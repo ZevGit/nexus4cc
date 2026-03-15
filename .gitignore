@@ -1,3 +1,6 @@
 
 # Claude Code persistence
 .claude-data/
+
+# Sensitive scripts for reference only
+.scripts/
