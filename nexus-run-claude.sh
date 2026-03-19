@@ -15,7 +15,8 @@ if [ -z "$PROFILE" ] || [ -z "$PROJECT" ]; then
     exit 1
 fi
 
-CONFIG_FILE="/app/data/configs/${PROFILE}.json"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONFIG_FILE="${SCRIPT_DIR}/data/configs/${PROFILE}.json"
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "[Nexus] Config profile '${PROFILE}' not found at ${CONFIG_FILE}"
     exit 1

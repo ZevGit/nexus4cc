@@ -100,7 +100,8 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
     // claude mode: inject proxy env vars so claude can reach the API
     const proxyEnv = CLAUDE_PROXY ? `ALL_PROXY=${CLAUDE_PROXY} HTTPS_PROXY=${CLAUDE_PROXY} HTTP_PROXY=${CLAUDE_PROXY}` : '';
     if (profile) {
-      shellCmd = `${proxyEnv} bash /app/nexus-run-claude.sh ${profile} ${cwd}`;
+      const runScript = join(__dirname, 'nexus-run-claude.sh');
+      shellCmd = `${proxyEnv} bash ${runScript} ${profile} ${cwd}`;
     } else {
       shellCmd = `${proxyEnv} claude --dangerously-skip-permissions; exec zsh -i`;
     }
