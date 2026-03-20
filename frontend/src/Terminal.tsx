@@ -103,6 +103,25 @@ function initCssVars(mode: ThemeMode) {
 }
 initCssVars(getInitialTheme())
 
+// Agent 状态推断（F-15）
+type WindowStatus = 'running' | 'waiting' | 'shell' | 'unknown'
+function getWindowStatus(data?: { output: string; idleMs: number; connected: boolean }): WindowStatus {
+  if (!data || !data.connected) return 'unknown'
+  if (data.idleMs < 4000) return 'running'
+  const stripped = data.output.replace(/\x1b\[[0-9;]*[mGKHFJA-Za-z]/g, '').replace(/\r/g, '')
+  const lines = stripped.split('\n').map(l => l.trimEnd()).filter(l => l.length > 0)
+  const lastLine = lines[lines.length - 1] || ''
+  if (/[\$#]\s*$/.test(lastLine)) return 'shell'
+  if (/[>?]\s*$/.test(lastLine)) return 'waiting'
+  return 'waiting'
+}
+const STATUS_DOT_COLOR: Record<WindowStatus, string> = {
+  running: '#22c55e', waiting: '#f59e0b', shell: '#94a3b8', unknown: '#475569',
+}
+const STATUS_DOT_TITLE: Record<WindowStatus, string> = {
+  running: '运行中', waiting: '等待输入', shell: '已退出 shell', unknown: '未连接',
+}
+
 // 复制模式覆盖层组件
 function CopyModeOverlay({ termRef, themeMode }: { termRef: React.MutableRefObject<XTerm | null>, themeMode: ThemeMode }) {
   const [lines, setLines] = useState<string[]>([])
@@ -186,6 +205,7 @@ function Sidebar({
   onOpenTasks,
   onUpload,
   onRename,
+  windowOutputs,
 }: {
   windows: TmuxWindow[]
   activeIndex: number
@@ -193,6 +213,7 @@ function Sidebar({
   activeSession: string
   onSwitchSession: (session: string) => void
   onSwitch: (index: number) => void
+  windowOutputs: Record<number, { output: string; clients: number; idleMs: number; connected: boolean }>
   onClose: (index: number) => void
   onAdd: () => void
   onOpenSettings: () => void
@@ -313,16 +334,12 @@ function Sidebar({
                 </>
               )}
             </span>
-            {win.active && renameIndex !== win.index && (
-              <span style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: '#22c55e',
-                flexShrink: 0,
-                marginRight: 4,
-              }} title="运行中" />
-            )}
+            {renameIndex !== win.index && (() => {
+              const status = getWindowStatus(windowOutputs[win.index])
+              const color = STATUS_DOT_COLOR[status]
+              const title = STATUS_DOT_TITLE[status]
+              return <span style={{ width: 6, height: 6, borderRadius: '50%', background: color, flexShrink: 0, marginRight: 4 }} title={title} />
+            })()}
             {hoveredIndex === win.index && renameIndex !== win.index && (
               <>
                 <button
@@ -454,7 +471,7 @@ export default function Terminal({ token }: Props) {
   const [windowsLoaded, setWindowsLoaded] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadFileRef = useRef<(file: File) => Promise<void>>(null!)
-  const [, setWindowOutputs] = useState<Record<number, { output: string; clients: number; idleMs: number }>>({})
+  const [windowOutputs, setWindowOutputs] = useState<Record<number, { output: string; clients: number; idleMs: number; connected: boolean }>>({})
   const scrollPositionsRef = useRef<Record<number, number>>({})
   const [showGuide, setShowGuide] = useState(() => localStorage.getItem('nexus_guide_seen') !== 'true')
 
@@ -1083,6 +1100,7 @@ export default function Terminal({ token }: Props) {
             onOpenTasks={() => setShowTasks(true)}
             onUpload={handleFileUpload}
             onRename={renameWindow}
+            windowOutputs={windowOutputs}
           />
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
             <div ref={containerRef} style={styles.terminal} onClick={() => inputRef.current?.focus()} />

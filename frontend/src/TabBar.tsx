@@ -1,5 +1,30 @@
 import { useState, useRef, useEffect } from 'react'
 
+type WindowStatus = 'running' | 'waiting' | 'shell' | 'unknown'
+
+function getWindowStatus(outputData?: { output: string; idleMs: number; connected: boolean }): WindowStatus {
+  if (!outputData || !outputData.connected) return 'unknown'
+  const { output, idleMs } = outputData
+  // 最近有输出 → 运行中
+  if (idleMs < 4000) return 'running'
+  // 分析最后一行
+  const stripped = output.replace(/\x1b\[[0-9;]*[mGKHFJA-Za-z]/g, '').replace(/\r/g, '')
+  const lines = stripped.split('\n').map(l => l.trimEnd()).filter(l => l.length > 0)
+  const lastLine = lines[lines.length - 1] || ''
+  // Shell prompt 特征：含 $ 或 # 结尾，且有用户名/路径特征
+  if (/[\$#]\s*$/.test(lastLine)) return 'shell'
+  // Claude 等待输入（常见提示符样式）
+  if (/>\s*$/.test(lastLine) || /\?\s*$/.test(lastLine)) return 'waiting'
+  return 'waiting'
+}
+
+const STATUS_DOT: Record<WindowStatus, { color: string; title: string }> = {
+  running: { color: '#22c55e', title: '运行中' },
+  waiting: { color: '#f59e0b', title: '等待输入' },
+  shell:   { color: '#94a3b8', title: '已退出 shell' },
+  unknown: { color: '#475569', title: '未连接' },
+}
+
 interface TmuxWindow {
   index: number
   name: string
@@ -28,7 +53,7 @@ export default function TabBar({ windows, activeIndex, onSwitch, onClose, onAdd,
   const [renameValue, setRenameValue] = useState('')
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const [showSessionPicker, setShowSessionPicker] = useState(false)
-  const [windowOutputs, setWindowOutputs] = useState<Record<number, { output: string; clients: number; idleMs: number }>>({})
+  const [windowOutputs, setWindowOutputs] = useState<Record<number, { output: string; clients: number; idleMs: number; connected: boolean }>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
   const activeTabRef = useRef<HTMLDivElement>(null)
   const renameInputRef = useRef<HTMLInputElement>(null)
@@ -156,7 +181,11 @@ export default function TabBar({ windows, activeIndex, onSwitch, onClose, onAdd,
                 }}>{item.name}</span>
               )}
               {item.index === activeIndex && <span style={s.activeIndicator} />}
-              {item.active && <span style={s.runningDot} title="运行中" />}
+              {(() => {
+                const status = getWindowStatus(windowOutputs[item.index])
+                const dot = STATUS_DOT[status]
+                return <span style={{ ...s.runningDot, background: dot.color }} title={dot.title} />
+              })()}
             </div>
           ))}
         </div>
