@@ -107,7 +107,7 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
     ...(process.env.ALL_PROXY   ? { ALL_PROXY:   process.env.ALL_PROXY   } : {}),
     ...(process.env.http_proxy  ? { http_proxy:  process.env.http_proxy  } : {}),
     ...(process.env.https_proxy ? { https_proxy: process.env.https_proxy } : {}),
-    ...(CLAUDE_PROXY ? { ALL_PROXY: CLAUDE_PROXY, HTTPS_PROXY: CLAUDE_PROXY, HTTP_PROXY: CLAUDE_PROXY } : {}),
+    ...(CLAUDE_PROXY ? { ALL_PROXY: CLAUDE_PROXY, HTTPS_PROXY: CLAUDE_PROXY, HTTP_PROXY: CLAUDE_PROXY, NEXUS_PROXY: CLAUDE_PROXY } : {}),
   };
 
   const proxyExports = Object.entries(proxyVars).map(([k, v]) => `export ${k}='${v}'`).join('; ');

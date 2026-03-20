@@ -67,12 +67,16 @@ export API_TIMEOUT_MS="$API_TIMEOUT_MS"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export DOCKER_HOST="tcp://host.docker.internal:2375"
 
-# ── 代理变量：从调用环境继承 ──
-[ -n "$HTTP_PROXY"  ] && export HTTP_PROXY
-[ -n "$HTTPS_PROXY" ] && export HTTPS_PROXY
-[ -n "$ALL_PROXY"   ] && export ALL_PROXY
-[ -n "$http_proxy"  ] && export http_proxy
-[ -n "$https_proxy" ] && export https_proxy
+# ── 代理变量：优先使用 NEXUS_PROXY（server.js 注入），其次继承环境 ──
+_proxy="${NEXUS_PROXY:-${HTTP_PROXY:-}}"
+if [ -n "$_proxy" ]; then
+    export HTTP_PROXY="$_proxy"
+    export HTTPS_PROXY="$_proxy"
+    export ALL_PROXY="$_proxy"
+    export http_proxy="$_proxy"
+    export https_proxy="$_proxy"
+fi
+unset _proxy
 
 cd "$PROJECT"
 
