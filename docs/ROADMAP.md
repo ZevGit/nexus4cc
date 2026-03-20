@@ -81,3 +81,9 @@
 | feat: 任务删除按钮 + 服务启动清理孤儿任务 | `5f09814` |
 | feat: 任务输出复制按钮 + 一键重新执行 | `586df3c` |
 | style: running 状态改用 pulse 动画 | `5b59f4d` |
+| fix(mobile): TabBar 新增任务面板按钮（移动端 TaskPanel 入口） | `b754914` |
+| fix(perf): 消除 TabBar 重复轮询（统一从 Terminal.tsx 传入） | `b754914` |
+| feat(tasks): 运行中任务徽标（Sidebar + TabBar 📋 按钮绿点） | `24e95a4` |
+| fix(tasks): TaskPanel 首次打开时申请浏览器通知权限 | `667fc8f` |
+| feat(ui): 页面标题显示运行中任务数量 `(N)` | `524c9fa` |
+| fix: tasks.json 上限 200 条；窗口输出轮询加 session 参数 | `8cf0aba` |

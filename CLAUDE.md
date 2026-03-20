@@ -31,8 +31,7 @@ frontend/src/
   App.tsx                  # 路由：登录页 / 终端页
   Terminal.tsx             # xterm.js + WebSocket + 触摸处理
   Toolbar.tsx              # 可配置工具栏（固定行 + 展开区）
-  TabBar.tsx               # tmux window 标签（桌面端顶部）
-  BottomNav.tsx            # 移动端底导航
+  TabBar.tsx               # tmux window 标签（< 768px 顶部导航）
   SessionManager.tsx       # 新建/切换 session 面板
   toolbarDefaults.ts       # 按键定义与出厂配置
 data/                      # Docker volume 持久化
