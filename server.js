@@ -360,6 +360,15 @@ function saveTasks(tasks) {
   writeFileSync(TASKS_FILE, JSON.stringify(tasks, null, 2))
 }
 
+function updateTask(id, updates) {
+  const tasks = loadTasks()
+  const idx = tasks.findIndex(t => t.id === id)
+  if (idx !== -1) {
+    Object.assign(tasks[idx], updates)
+    saveTasks(tasks)
+  }
+}
+
 // GET /api/tasks — 获取任务历史
 app.get('/api/tasks', authMiddleware, (req, res) => {
   const tasks = loadTasks()
@@ -402,6 +411,23 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
   const args = ['-p', prompt, '--dangerously-skip-permissions']
   if (profile) args.push('--profile', profile)
 
+  // 立即保存 running 状态，让 TaskPanel 轮询可以看到进行中的任务
+  const taskRecord = {
+    id: taskId,
+    session_name,
+    tmux_session: targetSession !== TMUX_SESSION ? targetSession : undefined,
+    prompt: prompt.slice(0, 1000),
+    status: 'running',
+    output: '',
+    error: '',
+    createdAt,
+    source: 'web',
+  }
+  const allTasks = loadTasks()
+  allTasks.push(taskRecord)
+  if (allTasks.length > 100) allTasks.shift()
+  saveTasks(allTasks)
+
   const child = spawn('claude', args, {
     cwd,
     env: { ...process.env, ...proxyEnv },
@@ -429,24 +455,13 @@ app.post('/api/tasks', authMiddleware, (req, res) => {
   child.on('close', (code) => {
     const status = code === 0 ? 'success' : 'error'
     const completedAt = new Date().toISOString()
-
-    // 保存任务历史
-    const tasks = loadTasks()
-    tasks.push({
-      id: taskId,
-      session_name,
-      tmux_session: targetSession !== TMUX_SESSION ? targetSession : undefined,
-      prompt: prompt.slice(0, 1000), // 截断保存
+    updateTask(taskId, {
       status,
-      output: output.slice(-10000), // 保存最后10K输出
+      output: output.slice(-10000),
       error: errorOutput.slice(-1000),
-      createdAt,
       completedAt,
-      exitCode: code
+      exitCode: code,
     })
-    // 只保留最近 100 条
-    if (tasks.length > 100) tasks.shift()
-    saveTasks(tasks)
 
     res.write(`event: done\ndata: ${JSON.stringify({ taskId, status, exitCode: code })}\n\n`)
     res.end()
@@ -593,6 +608,20 @@ app.post('/api/webhooks/telegram', (req, res) => {
 
   // 执行 claude -p 的通用函数，支持 Telegram 增量进度更新
   async function runClaudePrompt(prompt, cwd, sessionName) {
+    const taskId = `tg_${Date.now()}`
+    const createdAt = new Date().toISOString()
+
+    // 立即记录为 running，让 Web TaskPanel 可以看到进行中的 Telegram 任务
+    const tgRecord = {
+      id: taskId, session_name: sessionName || 'telegram',
+      prompt: prompt.slice(0, 1000), status: 'running',
+      output: '', error: '', createdAt, source: 'telegram', chatId,
+    }
+    const allTasks = loadTasks()
+    allTasks.push(tgRecord)
+    if (allTasks.length > 100) allTasks.shift()
+    saveTasks(allTasks)
+
     const msgId = await telegramSend(chatId, `⏳ *执行中*（session: \`${sessionName || 'default'}\`）\n\n_等待输出..._`)
 
     const proxyEnv = CLAUDE_PROXY ? { ALL_PROXY: CLAUDE_PROXY, HTTPS_PROXY: CLAUDE_PROXY, HTTP_PROXY: CLAUDE_PROXY } : {}
@@ -608,12 +637,15 @@ app.post('/api/webhooks/telegram', (req, res) => {
     child.stdout.on('data', (data) => { output += data.toString() })
     child.stderr.on('data', (data) => { errorOutput += data.toString() })
 
-    // 每 5 秒更新一次进度消息
+    // 每 5 秒更新进度：Telegram 消息 + 任务记录（让 Web TaskPanel 可见）
     const progressInterval = setInterval(() => {
       const preview = (output || errorOutput).trim()
-      if (preview && msgId) {
-        const truncated = preview.length > 3000 ? '…' + preview.slice(-3000) : preview
-        telegramEdit(chatId, msgId, `⏳ *执行中*（session: \`${sessionName || 'default'}\`）\n\`\`\`\n${truncated}\n\`\`\``)
+      if (preview) {
+        if (msgId) {
+          const truncated = preview.length > 3000 ? '…' + preview.slice(-3000) : preview
+          telegramEdit(chatId, msgId, `⏳ *执行中*（session: \`${sessionName || 'default'}\`）\n\`\`\`\n${truncated}\n\`\`\``)
+        }
+        updateTask(taskId, { output: output.slice(-10000), error: errorOutput.slice(-1000) })
       }
     }, 5000)
 
@@ -628,22 +660,13 @@ app.post('/api/webhooks/telegram', (req, res) => {
         telegramSend(chatId, `${status} *执行完成*\n\`\`\`\n${truncated}\n\`\`\``)
       }
 
-      const tasks = loadTasks()
-      tasks.push({
-        id: `tg_${Date.now()}`,
-        session_name: sessionName || 'telegram',
-        prompt: prompt.slice(0, 1000),
+      updateTask(taskId, {
         status: code === 0 ? 'success' : 'error',
         output: output.slice(-10000),
         error: errorOutput.slice(-1000),
-        createdAt: new Date().toISOString(),
         completedAt: new Date().toISOString(),
         exitCode: code,
-        source: 'telegram',
-        chatId,
       })
-      if (tasks.length > 100) tasks.shift()
-      saveTasks(tasks)
     })
   }
 

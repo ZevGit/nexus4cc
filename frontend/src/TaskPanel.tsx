@@ -112,7 +112,8 @@ export default function TaskPanel({ token, windows, activeWindowName, tmuxSessio
     }
   }
 
-  const activeTask = selectedTask
+  // Keep selectedTask fresh with latest data from polling
+  const activeTask = selectedTask ? (tasks.find(t => t.id === selectedTask.id) ?? selectedTask) : null
 
   return (
     <div style={s.overlay}>
@@ -199,7 +200,11 @@ export default function TaskPanel({ token, windows, activeWindowName, tmuxSessio
                     }}
                     onClick={() => setSelectedTask(activeTask?.id === task.id ? null : task)}
                   >
-                    <span style={{ ...s.statusDot, background: task.status === 'success' ? '#22c55e' : '#ef4444' }} />
+                    <span style={{
+                      ...s.statusDot,
+                      background: task.status === 'success' ? '#22c55e' : task.status === 'running' ? '#f59e0b' : '#ef4444',
+                      ...(task.status === 'running' ? { animation: 'spin 1.5s linear infinite' } : {}),
+                    }} />
                     <span style={s.taskPrompt}>{task.prompt.slice(0, 60)}{task.prompt.length > 60 ? '...' : ''}</span>
                     {task.source === 'telegram' && <span style={s.sourceBadge}>TG</span>}
                     <span style={s.taskSession}>{task.session_name}</span>
@@ -214,9 +219,13 @@ export default function TaskPanel({ token, windows, activeWindowName, tmuxSessio
         {activeTask && !isRunning && (
           <div style={s.outputSection}>
             <div style={s.outputHeader}>
-              <span style={s.outputLabel}>{activeTask.session_name} — {activeTask.status}</span>
+              {activeTask.status === 'running' && <span style={s.runningDot} />}
+              <span style={s.outputLabel}>
+                {activeTask.session_name} — {activeTask.status === 'running' ? '执行中' : activeTask.status}
+                {activeTask.source === 'telegram' ? ' · TG' : ''}
+              </span>
             </div>
-            <pre style={s.output}>{activeTask.output || activeTask.error || '(无输出)'}</pre>
+            <pre style={s.output}>{activeTask.output || activeTask.error || (activeTask.status === 'running' ? '等待输出...' : '(无输出)')}</pre>
           </div>
         )}
       </div>
