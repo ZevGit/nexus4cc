@@ -1276,16 +1276,15 @@ export default function Terminal({ token }: Props) {
             border: '1px solid var(--nexus-border)',
           }}>
             <h3 style={{ color: 'var(--nexus-text)', marginTop: 0 }}>欢迎使用 Nexus</h3>
-            <p style={{ color: 'var(--nexus-text2)', lineHeight: 1.6, fontSize: 14 }}>
-              Nexus 是 AI Agent 终端面板，黑色区域是终端模拟器，用于：
-            </p>
-            <ul style={{ color: 'var(--nexus-text2)', lineHeight: 1.8, fontSize: 13, paddingLeft: 20 }}>
-              <li>与 Claude Code 交互</li>
-              <li>查看命令行输出</li>
-              <li>编辑文件（Vim/Nano）</li>
+            <ul style={{ color: 'var(--nexus-text2)', lineHeight: 1.9, fontSize: 13, paddingLeft: 20, margin: '8px 0' }}>
+              <li>黑色区域是终端，点击聚焦后可键盘输入</li>
+              <li>底部工具栏提供 Esc/Tab/^C 等快捷键</li>
+              <li>📋 任务面板：后台发送 claude -p 任务</li>
+              <li>📎 上传图片/文件到当前 session 目录</li>
+              <li>长按标签可重命名或关闭会话</li>
             </ul>
-            <p style={{ color: 'var(--nexus-muted)', fontSize: 12, marginTop: 16 }}>
-              提示：点击终端区域聚焦输入，底部工具栏提供常用快捷键
+            <p style={{ color: 'var(--nexus-muted)', fontSize: 11, marginTop: 8 }}>
+              Telegram Bot: /api/telegram/setup 一键配置
             </p>
             <button
               onClick={() => {
