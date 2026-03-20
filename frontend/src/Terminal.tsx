@@ -207,6 +207,7 @@ function Sidebar({
   onUpload,
   onRename,
   windowOutputs,
+  runningTaskCount,
 }: {
   windows: TmuxWindow[]
   activeIndex: number
@@ -221,6 +222,7 @@ function Sidebar({
   onOpenTasks: () => void
   onUpload: () => void
   onRename?: (index: number, name: string) => void
+  runningTaskCount?: number
 }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   const [renameIndex, setRenameIndex] = useState<number | null>(null)
@@ -413,7 +415,7 @@ function Sidebar({
             textAlign: 'left',
           }}
           onClick={onOpenTasks}
-        >📋 任务面板</button>
+        >📋 任务面板{runningTaskCount ? <span style={{ marginLeft: 6, background: '#22c55e', color: '#fff', borderRadius: 10, fontSize: 10, fontWeight: 700, padding: '1px 5px' }}>{runningTaskCount}</span> : null}</button>
         <button
           style={{
             background: 'transparent',
@@ -474,6 +476,7 @@ export default function Terminal({ token }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const uploadFileRef = useRef<(file: File) => Promise<void>>(null!)
   const [windowOutputs, setWindowOutputs] = useState<Record<number, { output: string; clients: number; idleMs: number; connected: boolean }>>({})
+  const [runningTaskCount, setRunningTaskCount] = useState(0)
   const scrollPositionsRef = useRef<Record<number, number>>({})
   const windowsRef = useRef<TmuxWindow[]>([])
   windowsRef.current = windows
@@ -612,6 +615,22 @@ export default function Terminal({ token }: Props) {
     const interval = setInterval(fetchOutputs, 3000)
     return () => clearInterval(interval)
   }, [windows.length, token])
+
+  // 轮询运行中任务数量（用于徽标显示）
+  useEffect(() => {
+    async function fetchTaskCount() {
+      try {
+        const r = await fetch('/api/tasks', { headers: { Authorization: `Bearer ${token}` } })
+        if (r.ok) {
+          const tasks = await r.json()
+          setRunningTaskCount(tasks.filter((t: { status: string }) => t.status === 'running').length)
+        }
+      } catch {}
+    }
+    fetchTaskCount()
+    const interval = setInterval(fetchTaskCount, 5000)
+    return () => clearInterval(interval)
+  }, [token])
 
   const scrollToBottom = useCallback(() => {
     termRef.current?.scrollToBottom()
@@ -1211,6 +1230,7 @@ export default function Terminal({ token }: Props) {
             onUpload={handleFileUpload}
             onRename={renameWindow}
             windowOutputs={windowOutputs}
+            runningTaskCount={runningTaskCount}
           />
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
             <div ref={containerRef} style={styles.terminal} onClick={() => inputRef.current?.focus()} />
@@ -1243,6 +1263,7 @@ export default function Terminal({ token }: Props) {
             activeSession={activeTmuxSession}
             onSwitchSession={handleSwitchSession}
             windowOutputs={windowOutputs}
+            runningTaskCount={runningTaskCount}
           />
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden', position: 'relative' }}>
             <div ref={containerRef} style={styles.terminal} onClick={() => inputRef.current?.focus()} />

@@ -46,9 +46,10 @@ interface Props {
   activeSession?: string
   onSwitchSession?: (session: string) => void
   windowOutputs?: Record<number, { output: string; clients: number; idleMs: number; connected: boolean }>
+  runningTaskCount?: number
 }
 
-export default function TabBar({ windows, activeIndex, onSwitch, onClose, onAdd, onOpenSettings, onOpenTasks, onUpload, onRename, token, sessions, activeSession, onSwitchSession, windowOutputs: windowOutputsProp }: Props) {
+export default function TabBar({ windows, activeIndex, onSwitch, onClose, onAdd, onOpenSettings, onOpenTasks, onUpload, onRename, token, sessions, activeSession, onSwitchSession, windowOutputs: windowOutputsProp, runningTaskCount }: Props) {
   const [menuIndex, setMenuIndex] = useState<number | null>(null)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
   const [renameIndex, setRenameIndex] = useState<number | null>(null)
@@ -204,7 +205,14 @@ export default function TabBar({ windows, activeIndex, onSwitch, onClose, onAdd,
           )}
           <button style={s.iconBtn} onPointerDown={(e) => { e.preventDefault(); onAdd() }} title="新建会话">+</button>
           {onUpload && <button style={s.iconBtn} onPointerDown={(e) => { e.preventDefault(); onUpload() }} title="上传文件">📎</button>}
-          {onOpenTasks && <button style={s.iconBtn} onPointerDown={(e) => { e.preventDefault(); onOpenTasks() }} title="任务面板">📋</button>}
+          {onOpenTasks && (
+            <button style={{ ...s.iconBtn, position: 'relative' }} onPointerDown={(e) => { e.preventDefault(); onOpenTasks() }} title="任务面板">
+              📋
+              {!!runningTaskCount && (
+                <span style={{ position: 'absolute', top: 2, right: 2, background: '#22c55e', borderRadius: '50%', width: 8, height: 8, display: 'block' }} />
+              )}
+            </button>
+          )}
           <button style={s.iconBtn} onPointerDown={(e) => { e.preventDefault(); onOpenSettings() }} title="设置">⚙</button>
         </div>
       </div>
