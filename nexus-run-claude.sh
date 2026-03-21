@@ -53,6 +53,11 @@ fi
 # 保留真实 HOME 的 .local/bin（claude 安装在那里），避免 HOME 切换后找不到自身
 export PATH="${HOME}/.local/bin:${PATH}"
 export HOME="$DATA_DIR"
+# 在 DATA_DIR 内建 claude symlink，使 claude 自检（installMethod=native）通过
+mkdir -p "$DATA_DIR/.local/bin"
+_real_claude="$(command -v claude 2>/dev/null)"
+[ -n "$_real_claude" ] && [ ! -e "$DATA_DIR/.local/bin/claude" ] && ln -sf "$_real_claude" "$DATA_DIR/.local/bin/claude"
+unset _real_claude
 export LANG="C.UTF-8"
 export LC_ALL="C.UTF-8"
 export ANTHROPIC_BASE_URL="$BASE_URL"
@@ -83,10 +88,6 @@ unset _proxy
 cd "$PROJECT"
 
 echo ""
-echo "[Nexus] Proxy check: $(curl -s --max-time 5 ipinfo.io/ip 2>/dev/null || echo 'unreachable') ($(curl -s --max-time 5 ipinfo.io/country 2>/dev/null || echo '?'))"
-echo "[Nexus] Config: ${CONFIG_FILE}"
-echo "[Nexus] Auth  : API_KEY=${ANTHROPIC_API_KEY:+set} AUTH_TOKEN=${ANTHROPIC_AUTH_TOKEN:+set} BASE_URL=${ANTHROPIC_BASE_URL}"
-echo ""
 echo "╔══════════════════════════════════════════╗"
 echo "║  Nexus · Claude Session"
 echo "║  Profile : ${LABEL:-$PROFILE}"
@@ -95,29 +96,16 @@ echo "║  Data    : $DATA_DIR"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
-# ── 辅助函数：检查是否有会话历史 ──
-has_session_history() {
-    [ -d "$DATA_DIR/.claude" ] && [ "$(ls -A "$DATA_DIR/.claude" 2>/dev/null)" ]
-}
-
 # ── 主循环：退出后提示续接 ──
-_force_new=0
 while true; do
-    if [ $_force_new -eq 0 ] && has_session_history; then
-        # 有历史：尝试 -c 续接；若报 "No conversation found" 则 fallback 新会话
-        claude -c --dangerously-skip-permissions || claude --dangerously-skip-permissions || true
-    else
-        # 无历史或用户主动选择新会话
-        claude --dangerously-skip-permissions || true
-    fi
-    _force_new=0
+    # kimi 不支持 claude -c 的 conversation resume，直接启动（历史通过左侧 Sessions 面板访问）
+    claude --dangerously-skip-permissions || true
     echo ""
-    echo "[Nexus] Claude exited.  r=restart(continue)  n=new session  b=bash shell  q=quit window"
+    echo "[Nexus] Claude exited.  r=restart  b=bash shell  q=quit window"
     read -r REPLY
     case "$REPLY" in
-        n) _force_new=1 ;;  # 强制新会话，不带 -c
-        b) exec bash -i ;;  # 切换到 bash，保持窗口不关闭
-        q) break ;;          # 退出脚本，关闭窗口
+        b) exec bash -i ;;
+        q) break ;;
     esac
 done
 
