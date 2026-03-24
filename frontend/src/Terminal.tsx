@@ -1630,12 +1630,20 @@ export default function Terminal({ token }: Props) {
                 </div>
               ))}
             </div>
-            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nexus-border)', flexShrink: 0 }}>
+            <div style={{ padding: '12px 16px', borderTop: '1px solid var(--nexus-border)', flexShrink: 0, display: 'flex', gap: 8 }}>
               <button
-                style={{ width: '100%', background: 'var(--nexus-accent)', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, padding: '12px 0', cursor: 'pointer', touchAction: 'manipulation' }}
+                style={{ flex: 1, background: 'var(--nexus-accent)', border: 'none', borderRadius: 8, color: '#fff', fontSize: 14, fontWeight: 600, padding: '12px 0', cursor: 'pointer', touchAction: 'manipulation', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
                 onClick={() => { setShowSessionDrawer(false); openNewSessionDialog() }}
               >
-                + 新建会话
+                <span>📁</span>
+                <span>新项目</span>
+              </button>
+              <button
+                style={{ flex: 1, background: 'var(--nexus-bg2)', border: '1px solid var(--nexus-border)', borderRadius: 8, color: 'var(--nexus-text)', fontSize: 14, fontWeight: 600, padding: '12px 0', cursor: 'pointer', touchAction: 'manipulation', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                onClick={() => { setShowSessionDrawer(false); handleCreateWindow() }}
+              >
+                <span>➕</span>
+                <span>新窗口</span>
               </button>
             </div>
           </div>
@@ -1699,7 +1707,8 @@ export default function Terminal({ token }: Props) {
               <li>底部工具栏提供 Esc/Tab/^C 等快捷键</li>
               <li style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="clipboard" size={14} />任务面板：后台发送 claude -p 任务</li>
               <li style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="paperclip" size={14} />上传图片/文件到当前 session 目录</li>
-              <li>长按标签可重命名或关闭会话</li>
+              <li>📁 新项目：在选定目录创建窗口</li>
+              <li>➕ 新窗口：在当前项目目录创建窗口</li>
             </ul>
             <p style={{ color: 'var(--nexus-muted)', fontSize: 11, marginTop: 8 }}>
               Telegram Bot: /api/telegram/setup 一键配置
