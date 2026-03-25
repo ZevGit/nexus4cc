@@ -495,6 +495,8 @@ export default function Terminal({ token }: Props) {
   const [drawerMenuIndex, setDrawerMenuIndex] = useState<number | null>(null)
   const [drawerRenameIndex, setDrawerRenameIndex] = useState<number | null>(null)
   const [drawerRenameValue, setDrawerRenameValue] = useState('')
+  // Toolbar 展开状态（移动端点击空白区域时收起）
+  const [toolbarCollapsed, setToolbarCollapsed] = useState<boolean | undefined>(undefined)
 
   // F-18: 多 tmux session 支持
   const [tmuxSessions, setTmuxSessions] = useState<string[]>([])
@@ -1151,6 +1153,8 @@ export default function Terminal({ token }: Props) {
           keyboardVisibleRef.current = false
           if (inputRef.current) { inputRef.current.inputMode = 'none'; inputRef.current.blur() }
           if (xtermTa) { xtermTa.inputMode = 'none'; xtermTa.blur() }
+          // 收起工具栏（如果展开的话）
+          setToolbarCollapsed(true)
         } else {
           keyboardVisibleRef.current = true
           // Focus xterm's own textarea — term.onData handles all input natively
@@ -1458,6 +1462,8 @@ export default function Terminal({ token }: Props) {
     onUpload: handleFileUpload,
     onUploadFile: uploadFile,
     runningTaskCount,
+    collapsed: toolbarCollapsed,
+    onCollapsedChange: setToolbarCollapsed,
   }
 
   return (

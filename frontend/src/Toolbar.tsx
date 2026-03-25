@@ -23,6 +23,10 @@ interface Props {
   runningTaskCount?: number
   /** When true: renders as a compact sidebar section (no theme/settings, flex-wrap key grid) */
   embedded?: boolean
+  /** Controlled collapsed state (optional). If provided, component acts as controlled. */
+  collapsed?: boolean
+  /** Callback when collapsed state changes (for controlled mode) */
+  onCollapsedChange?: (collapsed: boolean) => void
 }
 
 const KEY_MAP = Object.fromEntries(ALL_KEYS.map(k => [k.id, k]))
@@ -65,14 +69,27 @@ interface DragState {
 
 const ITEM_HEIGHT = 48 // px，每行编辑项高度
 
-export default function Toolbar({ token, sendToWs, scrollToBottom, termRef: _termRef, themeMode, onToggleTheme, onOpenSettings, onOpenTasks, onUploadFile, onFitTerminal, runningTaskCount, embedded }: Props) {
+export default function Toolbar({ token, sendToWs, scrollToBottom, termRef: _termRef, themeMode, onToggleTheme, onOpenSettings, onOpenTasks, onUploadFile, onFitTerminal, runningTaskCount, embedded, collapsed: controlledCollapsed, onCollapsedChange }: Props) {
   const [config, setConfig]           = useState<ToolbarConfig>(loadConfig)
-  const [collapsed, setCollapsed]     = useState(() => {
+  const isControlled = controlledCollapsed !== undefined
+  const [collapsedInternal, setCollapsedInternal] = useState(() => {
     const saved = localStorage.getItem(COLLAPSED_KEY)
     if (saved !== null) return saved === 'true'
     // Default: collapsed on PC (has keyboard), expanded on mobile
     return window.innerWidth >= 1024
   })
+  const collapsed = isControlled ? controlledCollapsed : collapsedInternal
+
+  function setCollapsed(value: boolean | ((prev: boolean) => boolean)) {
+    const next = typeof value === 'function' ? value(collapsed) : value
+    if (isControlled) {
+      onCollapsedChange?.(next)
+    } else {
+      setCollapsedInternal(next)
+    }
+    localStorage.setItem(COLLAPSED_KEY, String(next))
+  }
+
   const [editing, setEditing]         = useState(false)
   const [showPasteBox, setShowPasteBox] = useState(false)
   const pasteBoxRef   = useRef<HTMLTextAreaElement>(null)
