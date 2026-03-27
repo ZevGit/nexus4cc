@@ -594,31 +594,31 @@ function Sidebar({
           </button>
         </div>
 
-        {/* 底部单行：配置 + 快捷键 */}
-        <div style={{ display: 'flex', gap: 4 }}>
-          <button
-            style={{
-              flex: 1,
-              background: 'transparent',
-              border: '1px solid var(--nexus-border)',
-              borderRadius: 6,
-              color: 'var(--nexus-text2)',
-              cursor: 'pointer',
-              fontSize: 12,
-              padding: '6px 8px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 4,
-            }}
-            onClick={onOpenSettings}
-            title="配置管理"
-          >
-            <Icon name="settings" size={14} />
-            <span>配置</span>
-          </button>
+        {/* 底部单行：配置 + 快捷键 - 仅在传入回调时显示 */}
+        {onOpenShortcuts && (
+          <div style={{ display: 'flex', gap: 4 }}>
+            <button
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: '1px solid var(--nexus-border)',
+                borderRadius: 6,
+                color: 'var(--nexus-text2)',
+                cursor: 'pointer',
+                fontSize: 12,
+                padding: '6px 8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 4,
+              }}
+              onClick={onOpenSettings}
+              title="配置管理"
+            >
+              <Icon name="settings" size={14} />
+              <span>配置</span>
+            </button>
 
-          {onOpenShortcuts && (
             <button
               style={{
                 flex: 1,
@@ -640,8 +640,8 @@ function Sidebar({
               <Icon name="pencil" size={14} />
               <span>快捷键</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -1265,7 +1265,88 @@ export default function Terminal({ token }: Props) {
     const screen = container.querySelector('.xterm-screen') as HTMLElement
     if (screen) screen.style.userSelect = 'text'
 
+    // PC端：全局键盘捕获，确保所有快捷键直通终端（除白名单外）
+    function onGlobalKeyDown(e: KeyboardEvent) {
+      // 仅在PC宽屏模式且没有打开弹层时处理
+      if (window.innerWidth < 768) return
+      const anyOverlayOpen = showSessionDrawer || showTasks || showSettings || showNewSession || showScrollback || showSessionManagerV2 || showFiles
+      if (anyOverlayOpen) return
+
+      // 白名单：这些快捷键保留给浏览器/应用使用
+      const whitelist = [
+        { ctrl: true, key: 'r', desc: '浏览器刷新' },
+        { ctrl: true, key: 'l', desc: '浏览器地址栏' },
+        { ctrl: true, key: 't', desc: '新标签页' },
+        { ctrl: true, key: 'n', desc: '新窗口' },
+        { ctrl: true, key: 'w', desc: '关闭标签' },
+        { ctrl: true, key: 'v', desc: '粘贴' },
+        { ctrl: true, shift: true, key: 't', desc: '恢复标签' },
+        { ctrl: true, shift: true, key: 'n', desc: '隐身窗口' },
+        { ctrl: true, key: 'tab', desc: '切换标签' },
+        { ctrl: true, shift: true, key: 'tab', desc: '切换标签' },
+      ]
+
+      const isWhitelisted = whitelist.some((w: any) => {
+        if (w.ctrl !== undefined && w.ctrl !== e.ctrlKey) return false
+        if (w.shift !== undefined && w.shift !== e.shiftKey) return false
+        if (w.alt !== undefined && w.alt !== e.altKey) return false
+        if (w.meta !== undefined && w.meta !== e.metaKey) return false
+        return w.key.toLowerCase() === e.key.toLowerCase()
+      })
+
+      if (isWhitelisted) return // 让浏览器处理
+
+      // 其他所有按键：阻止默认行为，发送到终端
+      e.preventDefault()
+
+      // 转换按键为ANSI序列
+      let seq = ''
+      if (e.ctrlKey && e.key.length === 1) {
+        // Ctrl+字母 优先处理
+        seq = String.fromCharCode(e.key.toLowerCase().charCodeAt(0) - 96)
+      } else if (e.key.length === 1) {
+        seq = e.key
+      } else if (e.key === 'Enter') {
+        seq = '\r'
+      } else if (e.key === 'Tab') {
+        seq = '\t'
+      } else if (e.key === 'Backspace') {
+        seq = '\x7f'
+      } else if (e.key === 'Escape') {
+        seq = '\x1b'
+      } else if (e.key === 'ArrowUp') {
+        seq = '\x1b[A'
+      } else if (e.key === 'ArrowDown') {
+        seq = '\x1b[B'
+      } else if (e.key === 'ArrowRight') {
+        seq = '\x1b[C'
+      } else if (e.key === 'ArrowLeft') {
+        seq = '\x1b[D'
+      } else if (e.key === 'Home') {
+        seq = '\x1b[H'
+      } else if (e.key === 'End') {
+        seq = '\x1b[F'
+      } else if (e.key === 'PageUp') {
+        seq = '\x1b[5~'
+      } else if (e.key === 'PageDown') {
+        seq = '\x1b[6~'
+      } else if (e.key === 'Delete') {
+        seq = '\x1b[3~'
+      }
+
+      if (seq && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(seq)
+      }
+    }
+
+    window.addEventListener('keydown', onGlobalKeyDown, true)
+
     term.attachCustomKeyEventHandler((e: KeyboardEvent) => {
+      // PC端让全局处理器处理，这里只返回true允许通过
+      if (window.innerWidth >= 768) {
+        return false // xterm不处理，让全局处理器来
+      }
+      // 移动端保持原有逻辑
       if (e.ctrlKey && ['w', 't', 'n', 'l', 'r'].includes(e.key.toLowerCase())) {
         e.preventDefault()
         return true
@@ -1459,6 +1540,7 @@ export default function Terminal({ token }: Props) {
     window.addEventListener('pageshow', sendResize)
 
     return () => {
+      window.removeEventListener('keydown', onGlobalKeyDown, true)
       window.removeEventListener('orientationchange', onOrientationChange)
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pageshow', sendResize)
@@ -1644,7 +1726,12 @@ export default function Terminal({ token }: Props) {
     return () => document.removeEventListener('focusin', handleFocusin)
   }, [isWidePC])
 
-  // Track toolbar height for FAB constraint (using ref to avoid re-render loop)
+  // Track sidebar collapsed state for PC
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const saved = localStorage.getItem('nexus_sidebar_collapsed')
+    return saved !== null ? saved === 'true' : true // default collapsed
+  })
+  const [sidebarHovered, setSidebarHovered] = useState(false)
   useEffect(() => {
     const el = toolbarWrapRef.current
     if (!el) return
@@ -1778,30 +1865,284 @@ export default function Terminal({ token }: Props) {
       {isWidePC ? (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minHeight: 0 }}>
           <div style={{ display: 'flex', flex: 1, overflow: 'hidden', minHeight: 0 }}>
-            {/* Sidebar column: session/window list + all toolbar functions */}
-            <div style={{ width: 220, flexShrink: 0, borderRight: '1px solid var(--nexus-border)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-              <Sidebar
-                windows={windows}
-                activeIndex={activeWindowIndex}
-                sessions={tmuxSessions}
-                activeSession={activeTmuxSession}
-                onSwitchSession={handleSwitchSession}
-                onSwitch={attachToWindow}
-                onClose={closeWindow}
-                onNewProject={openNewSessionDialog}
-                onNewWindow={handleCreateWindow}
-                onOpenSettings={() => setShowSessionManagerV2(true)}
-                onOpenTasks={() => setShowTasks(true)}
-                onOpenFiles={() => setShowFiles(true)}
-                onUploadFile={uploadFile}
-                onOpenShortcuts={() => {}}
-                onRename={renameWindow}
-                onFocusTerm={() => termRef.current?.textarea?.focus()}
-                themeMode={themeMode}
-                onToggleTheme={toggleTheme}
-                windowOutputs={windowOutputs}
-                runningTaskCount={runningTaskCount}
-              />
+            {/* Collapsible Sidebar */}
+            <div
+              style={{
+                width: sidebarCollapsed ? 48 : 220,
+                flexShrink: 0,
+                borderRight: '1px solid var(--nexus-border)',
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+                background: 'var(--nexus-bg)',
+                transition: 'width 0.2s ease',
+              }}
+              onMouseEnter={() => setSidebarHovered(true)}
+              onMouseLeave={() => setSidebarHovered(false)}
+            >
+              {/* Collapse/Expand Toggle */}
+              <div
+                style={{
+                  height: 40,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: sidebarCollapsed ? 'center' : 'flex-end',
+                  padding: sidebarCollapsed ? 0 : '0 12px',
+                  borderBottom: '1px solid var(--nexus-border)',
+                }}
+              >
+                <button
+                  onClick={() => {
+                    const newState = !sidebarCollapsed
+                    setSidebarCollapsed(newState)
+                    localStorage.setItem('nexus_sidebar_collapsed', String(newState))
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--nexus-text2)',
+                    cursor: 'pointer',
+                    padding: '8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 6,
+                    opacity: sidebarCollapsed || sidebarHovered ? 1 : 0.5,
+                    transition: 'opacity 0.2s',
+                  }}
+                  title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
+                >
+                  <Icon name={sidebarCollapsed ? 'arrowRight' : 'arrowLeft'} size={16} />
+                </button>
+              </div>
+
+              {sidebarCollapsed ? (
+                /* Collapsed Sidebar - Icon Only */
+                <div
+                  style={{ flex: 1, overflow: 'hidden', padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 2 }}
+                  onClick={() => {
+                    setSidebarCollapsed(false)
+                    localStorage.setItem('nexus_sidebar_collapsed', 'false')
+                  }}
+                >
+                  {/* Window indicators */}
+                  {windows.map(win => {
+                    const status = getWindowStatus(windowOutputs[win.index])
+                    const isActive = win.index === activeWindowIndex
+                    return (
+                      <button
+                        key={win.index}
+                        onClick={() => attachToWindow(win.index)}
+                        style={{
+                          width: 48,
+                          height: 40,
+                          background: isActive ? 'var(--nexus-tab-active)' : 'transparent',
+                          border: 'none',
+                          borderLeft: isActive ? '3px solid var(--nexus-accent)' : '3px solid transparent',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: 'pointer',
+                          position: 'relative',
+                        }}
+                        title={win.name}
+                      >
+                        <span
+                          style={{
+                            width: 8,
+                            height: 8,
+                            borderRadius: '50%',
+                            background: STATUS_DOT_COLOR[status],
+                          }}
+                        />
+                      </button>
+                    )
+                  })}
+
+                  <div style={{ borderTop: '1px solid var(--nexus-border)', margin: '8px 0' }} />
+
+                  {/* Quick actions */}
+                  <button
+                    onClick={openNewSessionDialog}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--nexus-text2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                    title="新建项目"
+                  >
+                    <Icon name="folder" size={18} />
+                  </button>
+
+                  <button
+                    onClick={handleCreateWindow}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--nexus-text2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                    title="新建窗口"
+                  >
+                    <Icon name="plus" size={18} />
+                  </button>
+
+                  <button
+                    onClick={() => setShowTasks(true)}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--nexus-text2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      position: 'relative',
+                    }}
+                    title="任务面板"
+                  >
+                    <Icon name="clipboard" size={18} />
+                    {!!runningTaskCount && (
+                      <span style={{
+                        position: 'absolute',
+                        top: 6,
+                        right: 6,
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: 'var(--nexus-success)',
+                      }} />
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => setShowFiles(true)}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--nexus-text2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                    title="文件列表"
+                  >
+                    <Icon name="folder" size={18} />
+                  </button>
+
+                  <button
+                    onClick={handleFileUpload}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--nexus-text2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                    title="上传文件"
+                  >
+                    <Icon name="paperclip" size={18} />
+                  </button>
+
+                  <div style={{ flex: 1 }} />
+
+                  <button
+                    onClick={toggleTheme}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--nexus-text2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                    title={themeMode === 'dark' ? '切换亮色' : '切换暗色'}
+                  >
+                    <Icon name={themeMode === 'dark' ? 'sun' : 'moon'} size={18} />
+                  </button>
+
+                  <button
+                    onClick={() => setShowSessionManagerV2(true)}
+                    style={{
+                      width: 48,
+                      height: 40,
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--nexus-text2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                    title="配置管理"
+                  >
+                    <Icon name="settings" size={18} />
+                  </button>
+                </div>
+              ) : (
+                /* Expanded Sidebar - Full Panel */
+                <div
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
+                  onClick={(e) => {
+                    // 点击空白处（非按钮/输入框）收起侧边栏
+                    if (e.target === e.currentTarget || (e.target as HTMLElement).dataset?.role === 'sidebar-content') {
+                      setSidebarCollapsed(true)
+                      localStorage.setItem('nexus_sidebar_collapsed', 'true')
+                    }
+                  }}
+                >
+                  <div data-role="sidebar-content" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                    <Sidebar
+                      windows={windows}
+                      activeIndex={activeWindowIndex}
+                      sessions={tmuxSessions}
+                      activeSession={activeTmuxSession}
+                      onSwitchSession={handleSwitchSession}
+                      onSwitch={attachToWindow}
+                      onClose={closeWindow}
+                      onNewProject={openNewSessionDialog}
+                      onNewWindow={handleCreateWindow}
+                      onOpenSettings={() => setShowSessionManagerV2(true)}
+                      onOpenTasks={() => setShowTasks(true)}
+                      onOpenFiles={() => setShowFiles(true)}
+                      onUploadFile={uploadFile}
+                      onRename={renameWindow}
+                      onFocusTerm={() => termRef.current?.textarea?.focus()}
+                      themeMode={themeMode}
+                      onToggleTheme={toggleTheme}
+                      windowOutputs={windowOutputs}
+                      runningTaskCount={runningTaskCount}
+                    />
+                  </div>
+                  {/* PC端工具栏放在侧边栏底部 */}
+                  <div style={{ borderTop: '1px solid var(--nexus-border)', flexShrink: 0 }}>
+                    <Toolbar {...toolbarProps} embedded />
+                  </div>
+                </div>
+              )}
             </div>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
               <div ref={containerRef} style={styles.terminal} onClick={() => termRef.current?.textarea?.focus()} />
@@ -1816,7 +2157,6 @@ export default function Terminal({ token }: Props) {
               )}
             </div>
           </div>
-          {/* PC端不再显示底部工具栏 - 所有功能已集成到左侧边栏 */}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden', minHeight: 0 }}>
