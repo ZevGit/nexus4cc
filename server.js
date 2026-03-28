@@ -377,10 +377,12 @@ app.post('/api/files/upload', authMiddleware, (req, res, next) => {
     if (!req.file) return res.status(400).json({ error: 'no file' })
     const dateDir = new Date().toISOString().slice(0, 10)
     const url = `/uploads/${dateDir}/${req.file.filename}`
+    const fullPath = join(UPLOADS_DIR, dateDir, req.file.filename)
     res.json({
       ok: true,
       filename: req.file.filename,
       url,
+      fullPath,
       size: req.file.size,
       originalName: req.file.originalname
     })

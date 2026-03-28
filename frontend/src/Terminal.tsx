@@ -1176,13 +1176,13 @@ export default function Terminal({ token }: Props) {
       })
       if (!res.ok) throw new Error(await res.text())
       const data = await res.json()
-      const url = data.url
+      const fullPath = data.fullPath
       const filename = data.originalName || file.name
-      addUploadNotification(filename, url)
+      addUploadNotification(filename, fullPath)
       const term = termRef.current
       if (term) {
         term.writeln(`\r\n\x1b[32m[Nexus: 文件已上传]\x1b[0m ${filename}`)
-        term.writeln(`\x1b[36m路径: ${url}\x1b[0m`)
+        term.writeln(`\x1b[36m路径: ${fullPath}\x1b[0m`)
       }
     } catch (e: any) {
       console.error('Upload failed:', e)
