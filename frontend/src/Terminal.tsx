@@ -1615,7 +1615,7 @@ export default function Terminal({ token }: Props) {
     termRef,
     themeMode,
     onToggleTheme: toggleTheme,
-    onOpenSettings: () => setShowSessionManagerV2(v => !v),
+    onOpenSettings: () => setShowGeneralSettings(true),
     onOpenTasks: () => setShowTasks(true),
     onOpenFiles: () => setShowFiles(true),
     onUpload: handleFileUpload,
@@ -1812,7 +1812,7 @@ export default function Terminal({ token }: Props) {
                       onClose={closeWindow}
                       onNewProject={openNewSessionDialog}
                       onNewWindow={handleCreateWindow}
-                      onOpenSettings={() => setShowSessionManagerV2(true)}
+                      onOpenSettings={() => { setShowSessionManagerV2(false); setShowGeneralSettings(true) }}
                       onOpenTasks={() => setShowTasks(true)}
                       onOpenFiles={() => setShowFiles(true)}
                       onUploadFile={uploadFile}
