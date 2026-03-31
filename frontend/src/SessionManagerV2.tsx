@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useImperativeHandle, forwardRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import GhostShield from './GhostShield'
 import { Icon } from './icons'
@@ -26,6 +26,9 @@ interface Props {
   onSwitchChannel: (channelIndex: number) => void
   onNewProject: () => void
   onNewChannel: () => void
+  onBackgroundClick?: () => void
+  /** Refresh callback — exposed for sidebar toggle integration */
+  onRefresh?: () => void
   layout?: 'modal' | 'sidebar'
 }
 
@@ -51,7 +54,11 @@ function getChannelStatus(channel: Channel, isActive: boolean): keyof typeof STA
   return isActive ? 'running' : 'idle'
 }
 
-export default function SessionManagerV2({
+export interface SessionManagerV2Handle {
+  refresh: () => void
+}
+
+export default forwardRef<SessionManagerV2Handle, Props>(function SessionManagerV2({
   token,
   currentProject,
   currentChannelIndex,
@@ -60,8 +67,10 @@ export default function SessionManagerV2({
   onSwitchChannel,
   onNewProject,
   onNewChannel,
+  onRefresh: _onRefresh,
+  onBackgroundClick,
   layout = 'modal',
-}: Props) {
+}: Props, ref) {
   const { t } = useTranslation()
   const isDesktop = useIsDesktop()
   const isSidebar = layout === 'sidebar'
@@ -118,7 +127,6 @@ export default function SessionManagerV2({
   }, [token])
 
   useEffect(() => { fetchProjects() }, [fetchProjects])
-
   useEffect(() => {
     if (currentProject) fetchChannels(currentProject)
   }, [currentProject, fetchChannels])
@@ -128,6 +136,7 @@ export default function SessionManagerV2({
     if (currentProject) fetchChannels(currentProject)
   }, [fetchProjects, fetchChannels, currentProject])
 
+  useImperativeHandle(ref, () => ({ refresh: handleRefresh }), [handleRefresh])
 
   // --- Actions ---
 
@@ -355,13 +364,29 @@ export default function SessionManagerV2({
         {/* Project 列表 */}
         <div className="py-2 flex-1 flex flex-col min-h-0">
           <div className="px-3 pb-1.5 border-b border-nexus-border mb-1.5">
-            <div className="text-xs font-semibold text-nexus-text tracking-wide flex items-center gap-1.5">
-              <span className="text-sm">📁</span>
-              {t('sessionMgr.projects')}
+            <div className="text-xs font-semibold text-nexus-text tracking-wide flex items-center justify-between gap-1.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm">📁</span>
+                {t('sessionMgr.projects')}
+              </div>
+              {isSidebar && (
+                <button
+                  className="bg-transparent border-none text-nexus-text-2 cursor-pointer p-1 flex items-center justify-center opacity-70 hover:opacity-100 transition-opacity"
+                  onClick={handleRefresh}
+                  title={t('sessionMgr.refresh') || 'Refresh'}
+                >
+                  <Icon name="refresh" size={14} />
+                </button>
+              )}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-1.5 min-h-0">
+          <div
+            className="flex-1 overflow-y-auto px-1.5 min-h-0"
+            onClick={(e) => {
+              if (onBackgroundClick && e.target === e.currentTarget) onBackgroundClick()
+            }}
+          >
             {loadingProjects ? (
               <div className="text-nexus-muted text-sm px-3 py-2">{t('common.loading')}</div>
             ) : projects.length === 0 ? (
@@ -423,7 +448,12 @@ export default function SessionManagerV2({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-1.5 min-h-0">
+          <div
+            className="flex-1 overflow-y-auto px-1.5 min-h-0"
+            onClick={(e) => {
+              if (onBackgroundClick && e.target === e.currentTarget) onBackgroundClick()
+            }}
+          >
             {loadingChannels ? (
               <div className="text-nexus-muted text-sm px-3 py-2">{t('common.loading')}</div>
             ) : channels.length === 0 ? (
@@ -500,18 +530,6 @@ export default function SessionManagerV2({
   if (isSidebar) {
     return (
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-nexus-bg text-nexus-text">
-        {/* Refresh button for sidebar */}
-        <div className="px-3 pt-2 border-b border-nexus-border">
-          <button
-            className="flex items-center gap-1.5 bg-transparent border-none text-nexus-text-2 text-xs cursor-pointer py-1"
-            onPointerDown={handleRefresh}
-            title={t('sessionMgr.refresh') || 'Refresh'}
-          >
-            <Icon name="refresh" size={13} />
-            <span>{t('sessionMgr.refresh') || 'Refresh'}</span>
-          </button>
-        </div>
-
         {content}
 
         {/* Sidebar right-click menu - channel */}
@@ -608,4 +626,4 @@ export default function SessionManagerV2({
       </div>
     </div>
   )
-}
+})

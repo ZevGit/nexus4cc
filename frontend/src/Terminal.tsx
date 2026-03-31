@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState, lazy, Suspense } from 'react'
+import type { SessionManagerV2Handle } from './SessionManagerV2'
 import { useTranslation } from 'react-i18next'
 import { Terminal as XTerm, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -117,306 +118,6 @@ function applyNexusCssVars(mode: ThemeMode) {
 applyNexusCssVars(getInitialTheme())
 
 // Agent 状态推断（F-15）
-// 复制模式覆盖层组件
-function Sidebar({
-  windows,
-  activeIndex,
-  sessions,
-  activeSession,
-  onSwitchSession,
-  onSwitch,
-  onClose,
-  onNewProject,
-  onNewWindow,
-  onOpenSettings,
-  onOpenTasks,
-  onOpenFiles,
-  onUploadFile,
-  onOpenShortcuts,
-  onRename,
-  onFocusTerm,
-  themeMode,
-  onToggleTheme,
-  windowOutputs,
-  runningTaskCount,
-}: {
-  windows: TmuxWindow[]
-  activeIndex: number
-  sessions: string[]
-  activeSession: string
-  onSwitchSession: (session: string) => void
-  onSwitch: (index: number) => void
-  windowOutputs: Record<number, { output: string; clients: number; idleMs: number; connected: boolean }>
-  onClose: (index: number) => void
-  onNewProject: () => void
-  onNewWindow: () => void
-  onOpenSettings: () => void
-  onOpenTasks: () => void
-  onOpenFiles?: () => void
-  onUploadFile?: (file: File) => void
-  onOpenShortcuts?: () => void
-  onRename?: (index: number, name: string) => void
-  onFocusTerm?: () => void
-  themeMode: 'dark' | 'light'
-  onToggleTheme: () => void
-  runningTaskCount?: number
-}) {
-  const { t } = useTranslation()
-  const [renameIndex, setRenameIndex] = useState<number | null>(null)
-  const [renameValue, setRenameValue] = useState('')
-  const [menuOpenIndex, setMenuOpenIndex] = useState<number | null>(null)
-  const renameInputRef = useRef<HTMLInputElement>(null)
-  const [showUploadMenu, setShowUploadMenu] = useState(false)
-  const uploadBtnRef = useRef<HTMLButtonElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const pasteFileRef = useRef<HTMLInputElement>(null)
-  const [uploadMenuPos, setUploadMenuPos] = useState({ top: 0, left: 0 })
-
-  // 点击外部关闭窗口操作菜单
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      const target = e.target as HTMLElement
-      if (!target.closest('.window-menu-btn') && !target.closest('.window-action-row')) {
-        setMenuOpenIndex(null)
-      }
-    }
-    if (menuOpenIndex !== null) {
-      document.addEventListener('mousedown', handleClickOutside)
-      return () => document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [menuOpenIndex])
-
-  function submitRename() {
-    if (renameIndex !== null && renameValue.trim() && onRename) {
-      onRename(renameIndex, renameValue.trim())
-    }
-    setRenameIndex(null)
-    setRenameValue('')
-  }
-
-  return (
-    <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-nexus-bg">
-      {/* Session Selector */}
-      <div className="px-4 py-3 border-b border-nexus-border">
-        <div className="flex items-center mb-2">
-          <span className="text-nexus-text text-sm font-semibold flex-1">{t('sessionMgr.title')}</span>
-        </div>
-        <select
-          value={activeSession}
-          onChange={(e) => { onSwitchSession(e.target.value); setTimeout(() => onFocusTerm?.(), 50) }}
-          className="w-full bg-nexus-bg-2 border border-nexus-border rounded-md text-nexus-text text-sm px-2.5 py-2 cursor-pointer"
-        >
-          {sessions.map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Window List */}
-      <div className="flex-1 overflow-y-auto py-1.5">
-        {windows.map(win => {
-          const status = getWindowStatus(windowOutputs[win.index])
-          const isActive = win.index === activeIndex
-          const isMenuOpen = menuOpenIndex === win.index
-          const isRenaming = renameIndex === win.index
-          return (
-            <div key={win.index} className="border-b border-nexus-border">
-              {/* Main row */}
-              <div
-                className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer ${isActive ? 'bg-nexus-tab-active' : 'bg-transparent'}`}
-                onClick={() => { onSwitch(win.index); setTimeout(() => onFocusTerm?.(), 50) }}
-              >
-                <span
-                  className="w-2 h-2 rounded-full flex-shrink-0 inline-block"
-                  style={{ background: STATUS_DOT_COLOR[status] }}
-                  title={t(STATUS_DOT_TITLE[status])}
-                />
-                {isRenaming ? (
-                  <input
-                    ref={renameInputRef}
-                    value={renameValue}
-                    onChange={(e) => setRenameValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') submitRename()
-                      if (e.key === 'Escape') { setRenameIndex(null); setRenameValue('') }
-                    }}
-                    onBlur={submitRename}
-                    onClick={(e) => e.stopPropagation()}
-                    className="flex-1 bg-nexus-bg border border-nexus-accent rounded px-1.5 py-0.5 text-nexus-text text-sm font-mono outline-none"
-                  />
-                ) : (
-                  <span className={`flex-1 text-sm font-mono overflow-hidden text-ellipsis whitespace-nowrap ${isActive ? 'text-nexus-text' : 'text-nexus-text-2'}`}>{win.name}</span>
-                )}
-                {isActive && !isRenaming && <span className="text-nexus-accent text-sm font-semibold flex-shrink-0 flex items-center"><Icon name="check" size={14} /></span>}
-                <button
-                  className="window-menu-btn bg-transparent border-none text-nexus-text-2 cursor-pointer p-0.5 flex-shrink-0 flex items-center justify-center"
-                  onClick={(e) => { e.stopPropagation(); setMenuOpenIndex(isMenuOpen ? null : win.index); setRenameIndex(null) }}
-                ><Icon name="more" size={16} /></button>
-              </div>
-              {/* Action row */}
-              {isMenuOpen && !isRenaming && (
-                <div className="window-action-row flex gap-2 px-3 py-1.5 pb-2.5 bg-nexus-bg">
-                  <button
-                    className="flex-1 bg-transparent border border-nexus-border rounded-md text-nexus-text text-xs py-1.5 cursor-pointer"
-                    onClick={(e) => { e.stopPropagation(); setRenameValue(win.name); setRenameIndex(win.index); setMenuOpenIndex(null) }}
-                  ><span className="flex items-center justify-center gap-1"><Icon name="pencil" size={12} />{t('common.rename')}</span></button>
-                  <button
-                    className="flex-1 bg-transparent border border-nexus-error rounded-md text-nexus-error text-xs py-1.5 cursor-pointer"
-                    onClick={(e) => { e.stopPropagation(); onClose(win.index); setMenuOpenIndex(null) }}
-                  ><span className="flex items-center justify-center gap-1"><Icon name="x" size={12} />{t('common.close')}</span></button>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Hidden file inputs for upload */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*,video/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file && onUploadFile) { onUploadFile(file) }
-          e.target.value = ''
-        }}
-      />
-      <input
-        ref={pasteFileRef}
-        type="file"
-        accept="*/*"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0]
-          if (file && onUploadFile) { onUploadFile(file) }
-          e.target.value = ''
-        }}
-      />
-
-      {/* Bottom Actions */}
-      <div className="border-t border-nexus-border p-2 flex flex-col gap-1">
-        {/* 新建按钮 - 两个并排 */}
-        <div className="flex gap-1">
-          <button
-            className="flex-1 bg-nexus-accent border-none rounded-lg text-white cursor-pointer text-sm font-semibold py-2 px-2 flex items-center justify-center gap-1.5"
-            onClick={onNewProject}
-            title={t('sessionMgr.newProject')}
-          >
-            <Icon name="folderPlus" size={14} />
-            <span>{t('sessionMgr.newProject')}</span>
-          </button>
-          <button
-            className="flex-1 bg-transparent border border-nexus-border rounded-lg text-nexus-text-2 cursor-pointer text-sm py-2 px-2 flex items-center justify-center gap-1.5"
-            onClick={onNewWindow}
-            title={t('newChannel.title')}
-          >
-            <Icon name="plus" size={14} />
-            <span>{t('newChannel.title')}</span>
-          </button>
-        </div>
-
-        {/* 功能按钮网格 - 两列布局 */}
-        <div className="grid grid-cols-2 gap-1">
-          <button
-            className="bg-transparent border border-nexus-border rounded-md text-nexus-text-2 cursor-pointer text-xs py-1.5 px-2 flex items-center justify-center gap-1"
-            onClick={onOpenTasks}
-            title={t('tasks.title')}
-          >
-            <Icon name="clipboard" size={14} />
-            <span>{t('toolbar.tasks')}</span>
-            {!!runningTaskCount && <span className="bg-nexus-success text-white rounded-full text-[9px] px-1">{runningTaskCount}</span>}
-          </button>
-
-          {onOpenFiles && (
-            <button
-              className="bg-transparent border border-nexus-border rounded-md text-nexus-text-2 cursor-pointer text-xs py-1.5 px-2 flex items-center justify-center gap-1"
-              onClick={onOpenFiles}
-              title={t('toolbar.fileList')}
-            >
-              <Icon name="folder" size={14} />
-              <span>{t('toolbar.files')}</span>
-            </button>
-          )}
-
-          {/* 上传按钮 */}
-          <div className="relative">
-            <button
-              ref={uploadBtnRef}
-              className="w-full bg-transparent border border-nexus-border rounded-md text-nexus-text-2 cursor-pointer text-xs py-1.5 px-2 flex items-center justify-center gap-1"
-              onClick={(e) => {
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-                setUploadMenuPos({ top: rect.top - 80, left: rect.left })
-                setShowUploadMenu(v => !v)
-              }}
-              title={t('tabBar.upload')}
-            >
-              <Icon name="paperclip" size={14} />
-              <span>{t('tabBar.upload')}</span>
-            </button>
-            {showUploadMenu && (
-              <>
-                <div className="fixed inset-0 z-[299]" onClick={() => setShowUploadMenu(false)} />
-                <div
-                  className="fixed bg-nexus-menu-bg border border-nexus-border rounded-md py-1 min-w-[100px] z-[300] shadow-lg"
-                  style={{ top: uploadMenuPos.top, left: uploadMenuPos.left }}
-                >
-                  <button
-                    className="w-full flex items-center gap-2 bg-transparent border-none text-nexus-text cursor-pointer text-sm py-2 px-3 text-left"
-                    onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false) }}
-                  >
-                    <Icon name="image" size={14} />
-                    <span>{t('toolbar.photos')}</span>
-                  </button>
-                  <button
-                    className="w-full flex items-center gap-2 bg-transparent border-none text-nexus-text cursor-pointer text-sm py-2 px-3 text-left"
-                    onClick={() => { pasteFileRef.current?.click(); setShowUploadMenu(false) }}
-                  >
-                    <Icon name="folder" size={14} />
-                    <span>{t('toolbar.files')}</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          <button
-            className="bg-transparent border border-nexus-border rounded-md text-nexus-text-2 cursor-pointer text-xs py-1.5 px-2 flex items-center justify-center gap-1"
-            onClick={onToggleTheme}
-            title={themeMode === 'dark' ? t('toolbar.switchLight') : t('toolbar.switchDark')}
-          >
-            <Icon name={themeMode === 'dark' ? 'sun' : 'moon'} size={14} />
-            <span>{themeMode === 'dark' ? t('settings.themeLight') : t('settings.themeDark')}</span>
-          </button>
-        </div>
-
-        {/* 底部单行：配置（+ 快捷键若有回调） */}
-        <div className="flex gap-1">
-          <button
-            className="flex-1 bg-transparent border border-nexus-border rounded-md text-nexus-text-2 cursor-pointer text-xs py-1.5 px-2 flex items-center justify-center gap-1"
-            onClick={onOpenSettings}
-            title={t('settings.title')}
-          >
-            <Icon name="settings" size={14} />
-            <span>{t('toolbar.settings')}</span>
-          </button>
-          {onOpenShortcuts && (
-            <button
-              className="flex-1 bg-transparent border border-nexus-border rounded-md text-nexus-text-2 cursor-pointer text-xs py-1.5 px-2 flex items-center justify-center gap-1"
-              onClick={onOpenShortcuts}
-              title="快捷键"
-            >
-              <Icon name="pencil" size={14} />
-              <span>快捷键</span>
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 export default function Terminal({ token }: Props) {
   const { t } = useTranslation()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -482,6 +183,7 @@ export default function Terminal({ token }: Props) {
   const [wsSessionKey, setWsSessionKey] = useState<string>(() => localStorage.getItem('nexus_session') || '~')
   const activeTmuxSessionRef = useRef(activeTmuxSession)
   activeTmuxSessionRef.current = activeTmuxSession
+  const sessionManagerRef = useRef<SessionManagerV2Handle>(null)
 
   // 加载服务端默认 session
   useEffect(() => {
@@ -914,6 +616,7 @@ export default function Terminal({ token }: Props) {
   function handleNewWindowConfirm(shellType: 'claude' | 'bash', profile?: string) {
     setShowNewWindow(false)
     createWindow(shellType, profile)
+    setTimeout(() => sessionManagerRef.current?.refresh(), 500)
   }
 
   function handleSwitchSession(newSession: string, lastChannel?: number) {
@@ -1533,7 +1236,6 @@ export default function Terminal({ token }: Props) {
     const saved = localStorage.getItem('nexus_sidebar_collapsed')
     return saved !== null ? saved === 'true' : true // default collapsed
   })
-  const [sidebarHovered, setSidebarHovered] = useState(false)
   useEffect(() => {
     const el = toolbarWrapRef.current
     if (!el) return
@@ -1671,161 +1373,142 @@ export default function Terminal({ token }: Props) {
             <div
               className="flex-shrink-0 flex flex-col min-h-0 bg-nexus-bg border-r border-nexus-border transition-[width] duration-200 ease-out"
               style={{ width: sidebarCollapsed ? 48 : 220 }}
-              onMouseEnter={() => setSidebarHovered(true)}
-              onMouseLeave={() => setSidebarHovered(false)}
+              onClick={() => {
+                setSidebarCollapsed(!sidebarCollapsed)
+                localStorage.setItem('nexus_sidebar_collapsed', String(!sidebarCollapsed))
+              }}
             >
-              {/* Collapse/Expand Toggle */}
-              <div
-                className="h-10 flex items-center border-b border-nexus-border"
-                style={{ justifyContent: sidebarCollapsed ? 'center' : 'flex-end', padding: sidebarCollapsed ? 0 : '0 12px' }}
-              >
-                <button
-                  onClick={() => {
-                    const newState = !sidebarCollapsed
-                    setSidebarCollapsed(newState)
-                    localStorage.setItem('nexus_sidebar_collapsed', String(newState))
-                  }}
-                  className="bg-transparent border-none text-nexus-text-2 p-2 flex items-center justify-center rounded-md transition-opacity duration-200"
-                  style={{ opacity: sidebarCollapsed || sidebarHovered ? 1 : 0.5 }}
-                  title={sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'}
-                >
-                  <Icon name={sidebarCollapsed ? 'arrowRight' : 'arrowLeft'} size={16} />
-                </button>
-              </div>
-
               {sidebarCollapsed ? (
                 /* Collapsed Sidebar - Icon Only */
                 <div
-                  className="flex-1 overflow-hidden py-2 flex flex-col gap-0.5"
-                  onClick={() => {
-                    setSidebarCollapsed(false)
-                    localStorage.setItem('nexus_sidebar_collapsed', 'false')
-                  }}
+                  className="flex-1 overflow-hidden flex flex-col"
                 >
-                  {/* Window indicators */}
-                  {windows.map(win => {
-                    const status = getWindowStatus(windowOutputs[win.index])
-                    const isActive = win.index === activeWindowIndex
-                    return (
-                      <button
-                        key={win.index}
-                        onClick={() => attachToWindow(win.index)}
-                        className="w-12 h-10 bg-transparent border-none flex items-center justify-center cursor-pointer relative"
-                        style={{
-                          background: isActive ? 'var(--nexus-tab-active)' : 'transparent',
-                          borderLeft: isActive ? '3px solid var(--nexus-accent)' : '3px solid transparent',
-                        }}
-                        title={win.name}
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full"
-                          style={{ background: STATUS_DOT_COLOR[status] }}
-                        />
-                      </button>
-                    )
-                  })}
-
-                  <div className="border-t border-nexus-border my-2" />
-
-                  {/* Quick actions */}
-                  <button
-                    onClick={openNewSessionDialog}
-                    className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
-                    title="新建项目"
+                  {/* Scrollable window indicators */}
+                  <div
+                    className="flex-1 overflow-y-auto py-2 flex flex-col gap-0.5"
                   >
-                    <Icon name="folderPlus" size={18} />
-                  </button>
+                    {windows.map(win => {
+                      const status = getWindowStatus(windowOutputs[win.index])
+                      const isActive = win.index === activeWindowIndex
+                      return (
+                        <button
+                          key={win.index}
+                          onClick={(e) => { e.stopPropagation(); attachToWindow(win.index); }}
+                          className="w-12 h-10 bg-transparent border-none flex items-center justify-center cursor-pointer relative"
+                          style={{
+                            background: isActive ? 'var(--nexus-tab-active)' : 'transparent',
+                            borderLeft: isActive ? '3px solid var(--nexus-accent)' : '3px solid transparent',
+                          }}
+                          title={win.name}
+                        >
+                          <span
+                            className="w-2 h-2 rounded-full"
+                            style={{ background: STATUS_DOT_COLOR[status] }}
+                          />
+                        </button>
+                      )
+                    })}
+                  </div>
 
-                  <button
-                    onClick={handleCreateWindow}
-                    className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
-                    title="新建窗口"
+                  <div className="border-t border-nexus-border" onPointerDown={(e) => e.stopPropagation()} />
+
+                  {/* Fixed quick actions at bottom */}
+                  <div
+                    className="flex-shrink-0 flex flex-col"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <Icon name="plus" size={18} />
-                  </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); openNewSessionDialog(); }}
+                      className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
+                      title="新建项目"
+                    >
+                      <Icon name="folderPlus" size={18} />
+                    </button>
 
-                  <button
-                    onClick={() => setShowTasks(true)}
-                    className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer relative"
-                    title="任务面板"
-                  >
-                    <Icon name="clipboard" size={18} />
-                    {!!runningTaskCount && (
-                      <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-nexus-success" />
-                    )}
-                  </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleCreateWindow(); }}
+                      className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
+                      title="新建窗口"
+                    >
+                      <Icon name="plus" size={18} />
+                    </button>
 
-                  <button
-                    onClick={() => setShowFiles(true)}
-                    className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
-                    title="文件列表"
-                  >
-                    <Icon name="folder" size={18} />
-                  </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowTasks(true); }}
+                      className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer relative"
+                      title="任务面板"
+                    >
+                      <Icon name="clipboard" size={18} />
+                      {!!runningTaskCount && (
+                        <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-nexus-success" />
+                      )}
+                    </button>
 
-                  <button
-                    onClick={handleFileUpload}
-                    className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
-                    title="上传文件"
-                  >
-                    <Icon name="paperclip" size={18} />
-                  </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowFiles(true); }}
+                      className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
+                      title="文件列表"
+                    >
+                      <Icon name="folder" size={18} />
+                    </button>
 
-                  <div className="flex-1" />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleFileUpload(); }}
+                      className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
+                      title="上传文件"
+                    >
+                      <Icon name="paperclip" size={18} />
+                    </button>
 
-                  <button
-                    onClick={toggleTheme}
-                    className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
-                    title={themeMode === 'dark' ? '切换亮色' : '切换暗色'}
-                  >
-                    <Icon name={themeMode === 'dark' ? 'sun' : 'moon'} size={18} />
-                  </button>
+                    <div className="flex-1" />
 
-                  <button
-                    onClick={() => setShowSessionManagerV2(true)}
-                    className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
-                    title="配置管理"
-                  >
-                    <Icon name="settings" size={18} />
-                  </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); toggleTheme(); }}
+                      className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
+                      title={themeMode === 'dark' ? '切换亮色' : '切换暗色'}
+                    >
+                      <Icon name={themeMode === 'dark' ? 'sun' : 'moon'} size={18} />
+                    </button>
+
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setShowSessionManagerV2(true); }}
+                      className="w-12 h-10 bg-transparent border-none text-nexus-text-2 flex items-center justify-center cursor-pointer"
+                      title="配置管理"
+                    >
+                      <Icon name="settings" size={18} />
+                    </button>
+                  </div>
                 </div>
               ) : (
-                /* Expanded Sidebar - Full Panel */
+                /* Expanded Sidebar - Project + Channel list */
                 <div
                   className="flex-1 flex flex-col min-h-0"
                   onClick={(e) => {
-                    // 点击空白处（非按钮/输入框）收起侧边栏
-                    if (e.target === e.currentTarget || (e.target as HTMLElement).dataset?.role === 'sidebar-content') {
+                    if (e.target === e.currentTarget) {
                       setSidebarCollapsed(true)
                       localStorage.setItem('nexus_sidebar_collapsed', 'true')
                     }
                   }}
                 >
-                  <div data-role="sidebar-content" className="flex-1 flex flex-col min-h-0">
-                    <Sidebar
-                      windows={windows}
-                      activeIndex={activeWindowIndex}
-                      sessions={tmuxSessions}
-                      activeSession={activeTmuxSession}
-                      onSwitchSession={handleSwitchSession}
-                      onSwitch={attachToWindow}
-                      onClose={closeWindow}
+                  <div onClick={(e) => e.stopPropagation()}>
+                    <SessionManagerV2
+                      ref={sessionManagerRef}
+                      token={token}
+                      currentProject={activeTmuxSession}
+                      currentChannelIndex={activeWindowIndex}
+                      onClose={() => {}}
+                      onSwitchProject={(name) => handleSwitchSession(name)}
+                      onSwitchChannel={(idx) => attachToWindow(idx)}
                       onNewProject={openNewSessionDialog}
-                      onNewWindow={handleCreateWindow}
-                      onOpenSettings={() => { setShowSessionManagerV2(false); setShowGeneralSettings(true) }}
-                      onOpenTasks={() => setShowTasks(true)}
-                      onOpenFiles={() => setShowFiles(true)}
-                      onUploadFile={uploadFile}
-                      onRename={renameWindow}
-                      onFocusTerm={() => termRef.current?.textarea?.focus()}
-                      themeMode={themeMode}
-                      onToggleTheme={toggleTheme}
-                      windowOutputs={windowOutputs}
-                      runningTaskCount={runningTaskCount}
+                      onNewChannel={handleCreateWindow}
+                      onBackgroundClick={() => {
+                        setSidebarCollapsed(true)
+                        localStorage.setItem('nexus_sidebar_collapsed', 'true')
+                      }}
+                      layout="sidebar"
                     />
                   </div>
-                  {/* PC端工具栏放在侧边栏底部 */}
-                  <div className="border-t border-nexus-border flex-shrink-0">
+                  <div className="border-t border-nexus-border flex-shrink-0" onClick={(e) => e.stopPropagation()}>
                     <Toolbar {...toolbarProps} embedded />
                   </div>
                 </div>
