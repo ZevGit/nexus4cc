@@ -58,14 +58,6 @@ export interface SessionManagerV2Handle {
   refresh: () => void
 }
 
-// Compute a sidebar height based on viewport when in sidebar mode,
-// so child sections have real pixel bounds to constrain against.
-function useSidebarHeight() {
-  const isDesktop = useIsDesktop()
-  const toolbarHeight = 52
-  return isDesktop ? (window.innerHeight - toolbarHeight) : undefined
-}
-
 export default forwardRef<SessionManagerV2Handle, Props>(function SessionManagerV2({
   token,
   currentProject,
@@ -82,7 +74,6 @@ export default forwardRef<SessionManagerV2Handle, Props>(function SessionManager
   const { t } = useTranslation()
   const isDesktop = useIsDesktop()
   const isSidebar = layout === 'sidebar'
-  const sidebarHeight = useSidebarHeight()
   const [projects, setProjects] = useState<Project[]>([])
   const [channels, setChannels] = useState<Channel[]>([])
   const [loadingProjects, setLoadingProjects] = useState(false)
@@ -369,9 +360,9 @@ export default forwardRef<SessionManagerV2Handle, Props>(function SessionManager
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto flex flex-col min-h-0">
-        {/* Project 列表 — capped height so channels always visible below */}
-        <div className="py-2 flex flex-col min-h-0" style={{ flex: '0 1 35%' }}>
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* Project 列表 */}
+        <div className="py-2 flex flex-col min-h-0" style={{ flex: '1 1 50%' }}>
           <div className="px-3 pb-1.5 border-b border-nexus-border mb-1.5">
             <div className="text-xs font-semibold text-nexus-text tracking-wide flex items-center justify-between gap-1.5">
               <div className="flex items-center gap-1.5">
@@ -448,8 +439,8 @@ export default forwardRef<SessionManagerV2Handle, Props>(function SessionManager
           </button>
         </div>
 
-        {/* Channel 列表 — fills remaining space */}
-        <div className="py-2 flex flex-col min-h-0" style={{ flex: '1 1 0%' }}>
+        {/* Channel 列表 */}
+        <div className="py-2 flex flex-col min-h-0" style={{ flex: '1 1 50%' }}>
           <div className="px-3 pb-1.5 border-b border-nexus-border mb-1.5">
             <div className="text-xs font-semibold text-nexus-text tracking-wide flex items-center gap-1.5">
               <span className="text-sm">#</span>
@@ -537,11 +528,9 @@ export default forwardRef<SessionManagerV2Handle, Props>(function SessionManager
 
   // ====== Sidebar mode ======
   if (isSidebar) {
-    const halfH = Math.floor(sidebarHeight / 2)
     return (
       <div
-        className="h-full flex flex-col bg-nexus-bg text-nexus-text"
-        style={{ height: sidebarHeight ?? undefined }}
+        className="flex-1 flex flex-col min-h-0 bg-nexus-bg text-nexus-text"
       >
         {error && (
           <div className="bg-red-500/15 text-nexus-error px-4 py-2.5 text-sm flex items-center justify-between border-b border-nexus-border shrink-0">
