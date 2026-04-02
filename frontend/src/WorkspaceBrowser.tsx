@@ -13,6 +13,7 @@ interface Props {
   token: string
   onClose: () => void
   initialPath?: string
+  currentSession?: string
 }
 
 function formatSize(bytes?: number): string {
@@ -27,7 +28,7 @@ function formatTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
 }
 
-export default function WorkspaceBrowser({ token, onClose, initialPath = '' }: Props) {
+export default function WorkspaceBrowser({ token, onClose, initialPath = '', currentSession }: Props) {
   const { t } = useTranslation()
   const [path, setPath] = useState(initialPath)
   const [entries, setEntries] = useState<DirEntry[]>([])
@@ -51,9 +52,25 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '' }: P
     }
   }, [token, path])
 
+  // Effect 1: 获取当前 session 的 CWD 作为初始路径
+  useEffect(() => {
+    if (!currentSession) return
+    fetch(`/api/session-cwd?session=${encodeURIComponent(currentSession)}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.relative !== undefined) {
+          setPath(data.relative)
+        }
+      })
+      .catch(() => {})
+  }, [currentSession, token])
+
+  // Effect 2: 当 path 变化时获取目录内容
   useEffect(() => {
     fetchEntries()
-  }, [fetchEntries])
+  }, [path, fetchEntries])
 
   function navigateTo(name: string) {
     const newPath = path ? `${path}/${name}` : name

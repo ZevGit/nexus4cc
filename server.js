@@ -631,6 +631,47 @@ app.get('/api/projects', authMiddleware, (req, res) => {
   })
 })
 
+// GET /api/session-cwd — 获取指定 session 的 NEXUS_CWD
+app.get('/api/session-cwd', authMiddleware, (req, res) => {
+  const session = req.query.session || TMUX_SESSION
+  try {
+    const envOutput = execSync(`tmux show-environment -t ${session} NEXUS_CWD 2>/dev/null`).toString().trim()
+    const match = envOutput.match(/^NEXUS_CWD=(.+)$/)
+    const cwd = match ? match[1] : WORKSPACE_ROOT
+    // 返回相对于 WORKSPACE_ROOT 的路径
+    const relative = cwd.startsWith(WORKSPACE_ROOT) ? cwd.slice(WORKSPACE_ROOT.length).replace(/^\/+/, '') : ''
+    res.json({ cwd, relative })
+  } catch {
+    res.json({ cwd: WORKSPACE_ROOT, relative: '' })
+  }
+})
+
+// GET /api/workspace/files — 列出工作区目录内容
+app.get('/api/workspace/files', authMiddleware, (req, res) => {
+  const relativePath = req.query.path || ''
+  const targetPath = join(WORKSPACE_ROOT, relativePath)
+  // 安全检查：确保路径在 WORKSPACE_ROOT 内
+  if (!targetPath.startsWith(WORKSPACE_ROOT)) {
+    return res.status(403).json({ error: 'Access denied' })
+  }
+  try {
+    const entries = readdirSync(targetPath, { withFileTypes: true })
+    const result = entries.map(entry => {
+      const fullPath = join(targetPath, entry.name)
+      const stat = statSync(fullPath)
+      return {
+        name: entry.name,
+        type: entry.isDirectory() ? 'dir' : 'file',
+        size: entry.isFile() ? stat.size : undefined,
+        mtime: stat.mtime.getTime()
+      }
+    })
+    res.json({ entries: result })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // GET /api/projects/:name/channels — 列出指定 Project 的 Channels（windows）
 app.get('/api/projects/:name/channels', authMiddleware, (req, res) => {
   const sessionName = req.params.name
