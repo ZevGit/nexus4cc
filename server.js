@@ -8,7 +8,7 @@ import { createServer } from 'node:http';
 import { exec, spawn, execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join, normalize, isAbsolute } from 'path';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, statSync, rmdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, statSync, rmdirSync, renameSync, cpSync, rmSync } from 'fs';
 import https from 'node:https';
 import multer from 'multer';
 
@@ -447,6 +447,112 @@ app.put('/api/workspace/file', authMiddleware, (req, res) => {
     }
     writeFileSync(filePath, content, 'utf8')
     res.json({ ok: true, path: filePath })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// DELETE /api/workspace/entry — 删除文件或目录
+app.delete('/api/workspace/entry', authMiddleware, (req, res) => {
+  try {
+    let p = req.body?.path || req.query?.path || ''
+    if (!p) return res.status(400).json({ error: 'path required' })
+    if (!isAbsolute(p)) p = join(WORKSPACE_ROOT, p)
+    p = normalize(p)
+    if (p.includes('..')) {
+      return res.status(403).json({ error: 'invalid path' })
+    }
+    if (!existsSync(p)) {
+      return res.status(404).json({ error: 'not found' })
+    }
+    rmSync(p, { recursive: true, force: true })
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/workspace/rename — 重命名文件或目录
+app.post('/api/workspace/rename', authMiddleware, (req, res) => {
+  try {
+    let { path: srcPath, newName } = req.body || {}
+    if (!srcPath || !newName) return res.status(400).json({ error: 'path and newName required' })
+    if (!isAbsolute(srcPath)) srcPath = join(WORKSPACE_ROOT, srcPath)
+    srcPath = normalize(srcPath)
+    if (srcPath.includes('..')) {
+      return res.status(403).json({ error: 'invalid path' })
+    }
+    if (!existsSync(srcPath)) {
+      return res.status(404).json({ error: 'not found' })
+    }
+    const destPath = normalize(join(dirname(srcPath), newName))
+    if (destPath.includes('..')) {
+      return res.status(403).json({ error: 'invalid newName' })
+    }
+    if (existsSync(destPath)) {
+      return res.status(409).json({ error: 'already exists' })
+    }
+    renameSync(srcPath, destPath)
+    res.json({ ok: true, path: destPath })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/workspace/copy — 复制文件或目录
+app.post('/api/workspace/copy', authMiddleware, (req, res) => {
+  try {
+    let { sourcePath, targetPath } = req.body || {}
+    if (!sourcePath || !targetPath) return res.status(400).json({ error: 'sourcePath and targetPath required' })
+    if (!isAbsolute(sourcePath)) sourcePath = join(WORKSPACE_ROOT, sourcePath)
+    if (!isAbsolute(targetPath)) targetPath = join(WORKSPACE_ROOT, targetPath)
+    sourcePath = normalize(sourcePath)
+    targetPath = normalize(targetPath)
+    if (sourcePath.includes('..') || targetPath.includes('..')) {
+      return res.status(403).json({ error: 'invalid path' })
+    }
+    if (!existsSync(sourcePath)) {
+      return res.status(404).json({ error: 'source not found' })
+    }
+    if (existsSync(targetPath)) {
+      return res.status(409).json({ error: 'target already exists' })
+    }
+    cpSync(sourcePath, targetPath, { recursive: true })
+    res.json({ ok: true, path: targetPath })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// POST /api/workspace/move — 移动文件或目录
+app.post('/api/workspace/move', authMiddleware, (req, res) => {
+  try {
+    let { sourcePath, targetPath } = req.body || {}
+    if (!sourcePath || !targetPath) return res.status(400).json({ error: 'sourcePath and targetPath required' })
+    if (!isAbsolute(sourcePath)) sourcePath = join(WORKSPACE_ROOT, sourcePath)
+    if (!isAbsolute(targetPath)) targetPath = join(WORKSPACE_ROOT, targetPath)
+    sourcePath = normalize(sourcePath)
+    targetPath = normalize(targetPath)
+    if (sourcePath.includes('..') || targetPath.includes('..')) {
+      return res.status(403).json({ error: 'invalid path' })
+    }
+    if (!existsSync(sourcePath)) {
+      return res.status(404).json({ error: 'source not found' })
+    }
+    if (existsSync(targetPath)) {
+      return res.status(409).json({ error: 'target already exists' })
+    }
+    try {
+      renameSync(sourcePath, targetPath)
+    } catch (err) {
+      if (err.code === 'EXDEV') {
+        cpSync(sourcePath, targetPath, { recursive: true })
+        rmSync(sourcePath, { recursive: true, force: true })
+      } else {
+        throw err
+      }
+    }
+    res.json({ ok: true, path: targetPath })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

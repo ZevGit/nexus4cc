@@ -59,7 +59,16 @@
     "fileNamePlaceholder": "文件名 (如: readme.txt, notes.md)",
     "fileExtensionsHint": "支持 .txt, .md, .json 等任意扩展名",
     "chars": "字符",
-    "preview": "预览"
+    "preview": "预览",
+    "copyHere": "复制到此处",
+    "moveHere": "移动到此处",
+    "selectTargetDir": "选择目标目录",
+    "enterDir": "进入目录",
+    "copyEntry": "复制",
+    "moveEntry": "移动",
+    "deleteEntry": "删除",
+    "copyPath": "复制路径",
+    "deleteConfirm": "确定要删除 \"{{name}}\" 吗？此操作不可恢复。"
   },
   "newChannel": {
     "title": "新建频道",

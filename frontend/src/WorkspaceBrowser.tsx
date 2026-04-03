@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -105,6 +105,26 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '', cur
   const [pinchStartDist, setPinchStartDist] = useState(0)
   const [pinchStartFontSize, setPinchStartFontSize] = useState(14)
 
+  // 长按 / 右键菜单状态
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; entry: FileEntry } | null>(null)
+  const longPressTimerRef = useRef<number | null>(null)
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const suppressClickRef = useRef(false)
+
+  // 重命名对话框状态
+  const [showRenameDialog, setShowRenameDialog] = useState(false)
+  const [renameTarget, setRenameTarget] = useState<FileEntry | null>(null)
+  const [renameName, setRenameName] = useState('')
+  const [renameError, setRenameError] = useState('')
+  const [isRenaming, setIsRenaming] = useState(false)
+
+  // 复制 / 移动目标目录选择器状态
+  const [pickerMode, setPickerMode] = useState<'copy' | 'move' | null>(null)
+  const [pickerSource, setPickerSource] = useState<FileEntry | null>(null)
+  const [pickerPath, setPickerPath] = useState<string | null>(null)
+  const [pickerEntries, setPickerEntries] = useState<FileEntry[]>([])
+  const [pickerLoading, setPickerLoading] = useState(false)
+
   // 加载目录内容
   const loadEntries = useCallback(async (path: string) => {
     setLoading(true)
@@ -131,6 +151,142 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '', cur
       loadEntries(currentPath)
     }
   }, [currentPath, loadEntries])
+
+  // 获取某一条目的完整路径
+  function getEntryPath(name: string): string {
+    if (!currentPath) return ''
+    return currentPath.endsWith('/') ? `${currentPath}${name}` : `${currentPath}/${name}`
+  }
+
+  // 加载目标目录选择器内容（只保留目录）
+  const loadPickerEntries = useCallback(async (path: string) => {
+    setPickerLoading(true)
+    try {
+      const r = await fetch(`/api/workspace/files?path=${encodeURIComponent(path)}`, { headers })
+      if (!r.ok) throw new Error(await r.text())
+      const data = await r.json()
+      const dirs = (data.entries || []).filter((e: FileEntry) => e.type === 'dir')
+      setPickerPath(data.path)
+      setPickerEntries(dirs)
+    } catch {
+      setPickerEntries([])
+    } finally {
+      setPickerLoading(false)
+    }
+  }, [token])
+
+  // 当 pickerPath 变化时加载目录
+  useEffect(() => {
+    if (pickerPath !== null) {
+      loadPickerEntries(pickerPath)
+    }
+  }, [pickerPath, loadPickerEntries])
+
+  // 重命名
+  function openRename(entry: FileEntry) {
+    setRenameTarget(entry)
+    setRenameName(entry.name)
+    setRenameError('')
+    setShowRenameDialog(true)
+  }
+
+  async function doRename() {
+    if (!renameTarget || !renameName.trim() || !currentPath) return
+    setIsRenaming(true)
+    setRenameError('')
+    try {
+      const r = await fetch('/api/workspace/rename', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: getEntryPath(renameTarget.name), newName: renameName.trim() }),
+      })
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to rename')
+      }
+      setShowRenameDialog(false)
+      setRenameTarget(null)
+      setRenameName('')
+      loadEntries(currentPath)
+    } catch (e: any) {
+      setRenameError(e.message || 'Failed to rename')
+    } finally {
+      setIsRenaming(false)
+    }
+  }
+
+  // 删除
+  async function deleteEntry(entry: FileEntry) {
+    if (!confirm(t('workspace.deleteConfirm', { name: entry.name }))) return
+    try {
+      const r = await fetch('/api/workspace/entry', {
+        method: 'DELETE',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: getEntryPath(entry.name) }),
+      })
+      if (r.ok && currentPath) {
+        loadEntries(currentPath)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 复制路径到剪贴板
+  async function copyEntryPath(entry: FileEntry) {
+    const text = getEntryPath(entry.name)
+    let success = false
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text)
+        success = true
+      } catch {}
+    }
+    if (!success) {
+      try {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.style.cssText = 'position:fixed;left:-9999px;opacity:0;'
+        document.body.appendChild(textarea)
+        textarea.select()
+        success = document.execCommand('copy')
+        document.body.removeChild(textarea)
+      } catch {}
+    }
+    if (!success) {
+      alert(t('files.manualCopy', { text }))
+    }
+  }
+
+  // 打开复制 / 移动目录选择器
+  function openPicker(mode: 'copy' | 'move', entry: FileEntry) {
+    setPickerMode(mode)
+    setPickerSource(entry)
+    setPickerPath(currentPath)
+  }
+
+  async function performCopyMove() {
+    if (!pickerMode || !pickerSource || !pickerPath) return
+    const targetPath = pickerPath.endsWith('/') ? `${pickerPath}${pickerSource.name}` : `${pickerPath}/${pickerSource.name}`
+    const sourcePath = getEntryPath(pickerSource.name)
+    try {
+      const r = await fetch(`/api/workspace/${pickerMode}`, {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourcePath, targetPath }),
+      })
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed')
+      }
+      setPickerMode(null)
+      setPickerSource(null)
+      setPickerPath(null)
+      if (currentPath) loadEntries(currentPath)
+    } catch {
+      // ignore
+    }
+  }
 
   // 选中条目（单击）
   function handleSelect(name: string) {
@@ -430,8 +586,49 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '', cur
             {sortedEntries.map((entry) => (
               <button
                 key={entry.name}
-                onClick={() => handleSelect(entry.name)}
+                onClick={() => {
+                  if (suppressClickRef.current) return
+                  handleSelect(entry.name)
+                }}
                 onDoubleClick={() => handleDoubleClick(entry)}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setContextMenu({ x: e.clientX, y: e.clientY, entry })
+                }}
+                onTouchStart={(e) => {
+                  if (e.touches.length !== 1) return
+                  suppressClickRef.current = false
+                  const t = e.touches[0]
+                  touchStartRef.current = { x: t.clientX, y: t.clientY }
+                  longPressTimerRef.current = window.setTimeout(() => {
+                    suppressClickRef.current = true
+                    setContextMenu({ x: t.clientX, y: t.clientY, entry })
+                    touchStartRef.current = null
+                  }, 600)
+                }}
+                onTouchMove={(e) => {
+                  if (!touchStartRef.current || longPressTimerRef.current === null) return
+                  const t = e.touches[0]
+                  const dx = t.clientX - touchStartRef.current.x
+                  const dy = t.clientY - touchStartRef.current.y
+                  if (Math.sqrt(dx * dx + dy * dy) > 10) {
+                    clearTimeout(longPressTimerRef.current)
+                    longPressTimerRef.current = null
+                    touchStartRef.current = null
+                  }
+                }}
+                onTouchEnd={() => {
+                  if (longPressTimerRef.current !== null) {
+                    clearTimeout(longPressTimerRef.current)
+                    longPressTimerRef.current = null
+                  }
+                  touchStartRef.current = null
+                  if (suppressClickRef.current) {
+                    window.setTimeout(() => {
+                      suppressClickRef.current = false
+                    }, 50)
+                  }
+                }}
                 className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${
                   selectedName === entry.name ? 'bg-nexus-bg-2' : 'hover:bg-nexus-bg-2'
                 }`}
@@ -517,6 +714,224 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '', cur
           </div>
         )}
       </div>
+
+      {/* 长按 / 右键菜单 */}
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-[480]" onClick={() => setContextMenu(null)} />
+          <div
+            className="fixed z-[490] bg-nexus-bg rounded-lg border border-nexus-border shadow-lg py-1 min-w-[148px] max-w-[220px]"
+            style={{
+              left: Math.min(contextMenu.x, typeof window !== 'undefined' ? window.innerWidth - 160 : contextMenu.x),
+              top: Math.min(contextMenu.y, typeof window !== 'undefined' ? window.innerHeight - 240 : contextMenu.y),
+            }}
+          >
+            <div className="px-3 py-1.5 text-nexus-text text-xs font-medium border-b border-nexus-border truncate" title={contextMenu.entry.name}>
+              {contextMenu.entry.name}
+            </div>
+            {contextMenu.entry.type === 'dir' && (
+              <button
+                onClick={() => { navigateTo(contextMenu.entry.name); setContextMenu(null) }}
+                className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+              >
+                <Icon name="folderOpen" size={14} />
+                {t('workspace.enterDir')}
+              </button>
+            )}
+            {contextMenu.entry.type === 'file' && isTextFile(contextMenu.entry.name) && (
+              <button
+                onClick={() => { openEditor(contextMenu.entry.name); setContextMenu(null) }}
+                className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+              >
+                <Icon name="edit" size={14} />
+                {t('workspace.edit')}
+              </button>
+            )}
+            {contextMenu.entry.type === 'file' && (
+              <>
+                <button
+                  onClick={() => { openFile(contextMenu.entry.name); setContextMenu(null) }}
+                  className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+                >
+                  <Icon name="eye" size={14} />
+                  {t('workspace.view')}
+                </button>
+                <button
+                  onClick={() => { downloadFile(contextMenu.entry.name); setContextMenu(null) }}
+                  className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+                >
+                  <Icon name="download" size={14} />
+                  {t('workspace.download')}
+                </button>
+                <button
+                  onClick={() => { copyEntryPath(contextMenu.entry); setContextMenu(null) }}
+                  className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+                >
+                  <Icon name="copy" size={14} />
+                  {t('workspace.copyPath')}
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => { openRename(contextMenu.entry); setContextMenu(null) }}
+              className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+            >
+              <Icon name="pencil" size={14} />
+              {t('common.rename')}
+            </button>
+            <button
+              onClick={() => { openPicker('copy', contextMenu.entry); setContextMenu(null) }}
+              className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+            >
+              <Icon name="copy" size={14} />
+              {t('workspace.copyEntry')}
+            </button>
+            <button
+              onClick={() => { openPicker('move', contextMenu.entry); setContextMenu(null) }}
+              className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-text"
+            >
+              <Icon name="arrowRight" size={14} />
+              {t('workspace.moveEntry')}
+            </button>
+            <div className="border-t border-nexus-border my-1" />
+            <button
+              onClick={() => { deleteEntry(contextMenu.entry); setContextMenu(null) }}
+              className="w-full text-left px-3 py-2 text-sm flex items-center gap-2 hover:bg-nexus-bg-2 transition-colors text-nexus-error"
+            >
+              <Icon name="trash" size={14} />
+              {t('common.delete')}
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* 重命名对话框 */}
+      {showRenameDialog && (
+        <div className="fixed inset-0 z-[460] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-nexus-bg rounded-lg border border-nexus-border w-full max-w-sm p-4">
+            <h3 className="text-nexus-text font-medium mb-3">{t('common.rename')}</h3>
+            <input
+              type="text"
+              value={renameName}
+              onChange={(e) => setRenameName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && doRename()}
+              placeholder={t('workspace.fileNamePlaceholder')}
+              className="w-full px-3 py-2 bg-nexus-bg-2 border border-nexus-border rounded text-nexus-text text-sm focus:outline-none focus:border-nexus-accent"
+              autoFocus
+            />
+            {renameError && (
+              <div className="text-nexus-error text-xs mt-2">{renameError}</div>
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                onClick={() => { setShowRenameDialog(false); setRenameTarget(null); setRenameName(''); setRenameError('') }}
+                className="px-3 py-1.5 text-nexus-text-2 text-sm hover:text-nexus-text"
+              >
+                {t('common.cancel')}
+              </button>
+              <button
+                onClick={doRename}
+                disabled={!renameName.trim() || renameName.trim() === renameTarget?.name || isRenaming}
+                className="px-3 py-1.5 bg-nexus-accent text-white text-sm rounded disabled:opacity-50"
+              >
+                {isRenaming ? t('common.loading') : t('common.confirm')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 复制 / 移动目标目录选择器 */}
+      {pickerMode && (
+        <div className="fixed inset-0 z-[460] bg-nexus-bg flex flex-col">
+          <div className="flex items-center justify-between px-4 py-3.5 border-b border-nexus-border flex-shrink-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Icon name="folder" size={20} />
+              <span className="text-nexus-text font-semibold text-base truncate">
+                {pickerMode === 'copy' ? t('workspace.copyEntry') : t('workspace.moveEntry')}
+              </span>
+            </div>
+            <button
+              onClick={() => { setPickerMode(null); setPickerSource(null); setPickerPath(null) }}
+              className="bg-transparent border-none text-nexus-text-2 cursor-pointer p-1.5 flex items-center justify-center rounded-md shrink-0"
+            >
+              <Icon name="x" size={20} />
+            </button>
+          </div>
+
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-nexus-border bg-nexus-bg-2 flex-shrink-0 overflow-x-auto">
+            <button
+              onClick={() => setPickerPath('/')}
+              className={`text-sm whitespace-nowrap ${pickerPath === '/' ? 'text-nexus-accent font-medium' : 'text-nexus-text-2 hover:text-nexus-text'}`}
+            >
+              /
+            </button>
+            {(pickerPath && pickerPath !== '/' ? pickerPath.split('/').filter(Boolean) : []).map((crumb, idx, arr) => (
+              <span key={idx} className="flex items-center gap-1">
+                {idx > 0 && <span className="text-nexus-muted">/</span>}
+                <button
+                  onClick={() => {
+                    const path = '/' + arr.slice(0, idx + 1).join('/')
+                    setPickerPath(path)
+                  }}
+                  className={`text-sm whitespace-nowrap ${idx === arr.length - 1 ? 'text-nexus-accent font-medium' : 'text-nexus-text-2 hover:text-nexus-text'}`}
+                >
+                  {crumb}
+                </button>
+              </span>
+            ))}
+          </div>
+
+          {/* 选择当前目录按钮 */}
+          <div className="px-4 py-3 border-b border-nexus-border flex-shrink-0">
+            <button
+              onClick={performCopyMove}
+              className="w-full py-2 bg-nexus-accent hover:bg-nexus-accent/90 text-white text-sm rounded transition-colors"
+            >
+              {pickerMode === 'copy' ? t('workspace.copyHere') : t('workspace.moveHere')}
+              <span className="opacity-80 mx-1">·</span>
+              <span className="truncate inline-block align-bottom max-w-[60%]">{pickerPath}</span>
+            </button>
+          </div>
+
+          {/* 目录列表 */}
+          <div className="flex-1 overflow-y-auto">
+            {pickerLoading ? (
+              <div className="text-nexus-muted text-center py-10 text-sm">{t('common.loading')}</div>
+            ) : (
+              <div className="divide-y divide-nexus-border">
+                {pickerPath !== '/' && pickerPath !== '' && (
+                  <button
+                    onClick={() => {
+                      if (!pickerPath) return
+                      const idx = pickerPath.lastIndexOf('/')
+                      setPickerPath(idx <= 0 ? '/' : pickerPath.slice(0, idx))
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 transition-colors text-left hover:bg-nexus-bg-2"
+                  >
+                    <span className="text-xl shrink-0">⬆️</span>
+                    <span className="text-nexus-text text-sm">{t('workspace.parent')}</span>
+                  </button>
+                )}
+                {pickerEntries.map((entry) => (
+                  <button
+                    key={entry.name}
+                    onClick={() => setPickerPath(pickerPath?.endsWith('/') ? `${pickerPath}${entry.name}` : `${pickerPath}/${entry.name}`)}
+                    className="w-full flex items-center gap-3 px-4 py-3 transition-colors text-left hover:bg-nexus-bg-2"
+                  >
+                    <span className="text-xl shrink-0">📁</span>
+                    <span className="text-nexus-text text-sm font-mono truncate">{entry.name}</span>
+                  </button>
+                ))}
+                {pickerEntries.length === 0 && (
+                  <div className="text-nexus-muted text-center py-10 text-sm px-4">{t('workspace.empty')}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* 新建文件夹对话框 */}
       {showNewFolderDialog && (
