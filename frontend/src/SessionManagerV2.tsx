@@ -421,6 +421,8 @@ export default forwardRef<SessionManagerV2Handle, Props>(function SessionManager
                         e.stopPropagation()
                         showModalProjectMenu(project, e)
                       }}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onTouchEnd={(e) => e.stopPropagation()}
                       title={t('sessionMgr.moreOptions')}
                     >
                       <Icon name="more" size={16} />
@@ -481,6 +483,8 @@ export default forwardRef<SessionManagerV2Handle, Props>(function SessionManager
                         e.stopPropagation()
                         showModalChannelMenu(channel, e)
                       }}
+                      onTouchStart={(e) => e.stopPropagation()}
+                      onTouchEnd={(e) => e.stopPropagation()}
                       title={t('sessionMgr.moreOptions')}
                     >
                       <Icon name="more" size={16} />
