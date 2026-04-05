@@ -26,3 +26,4 @@ ecosystem.config.cjs
 
 # Runtime data (tasks, session configs)
 data/
+logs/
