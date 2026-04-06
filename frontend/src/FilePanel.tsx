@@ -1,6 +1,8 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Icon } from './icons'
+
+type SortKey = 'name' | 'modified' | 'size'
 
 interface FileItem {
   name: string
@@ -42,6 +44,29 @@ export default function FilePanel({ token, onClose }: Props) {
   const [groups, setGroups] = useState<FileGroup[]>([])
   const [loading, setLoading] = useState(true)
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey | null>(null)
+  const [sortAsc, setSortAsc] = useState(false)
+
+  function handleSort(key: SortKey) {
+    if (sortKey === key) {
+      setSortAsc(a => !a)
+    } else {
+      setSortKey(key)
+      setSortAsc(false)
+    }
+  }
+
+  const sortedFiles = useMemo(() => {
+    if (!sortKey) return null
+    const flat = groups.flatMap(g => g.files.map(f => ({ ...f, date: g.date })))
+    return [...flat].sort((a, b) => {
+      let cmp = 0
+      if (sortKey === 'name') cmp = a.name.localeCompare(b.name)
+      else if (sortKey === 'modified') cmp = a.created - b.created
+      else if (sortKey === 'size') cmp = a.size - b.size
+      return sortAsc ? cmp : -cmp
+    })
+  }, [groups, sortKey, sortAsc])
 
   const fetchFiles = useCallback(async () => {
     try {
@@ -170,6 +195,25 @@ export default function FilePanel({ token, onClose }: Props) {
         </div>
       </div>
 
+      {/* Sort Bar */}
+      <div className="flex items-center gap-1.5 px-4 py-2 border-b border-nexus-border flex-shrink-0">
+        <span className="text-nexus-muted text-xs mr-0.5">{t('files.sortBy')}</span>
+        {(['name', 'modified', 'size'] as SortKey[]).map(key => (
+          <button
+            key={key}
+            onClick={() => handleSort(key)}
+            className={`text-xs px-2 py-1 rounded-md flex items-center gap-0.5 transition-all duration-100 cursor-pointer border ${
+              sortKey === key
+                ? 'bg-nexus-accent border-nexus-accent text-white'
+                : 'bg-transparent border-nexus-border text-nexus-text-2'
+            }`}
+          >
+            {t(`files.sort.${key}`)}
+            {sortKey === key && <span className="ml-0.5">{sortAsc ? '↑' : '↓'}</span>}
+          </button>
+        ))}
+      </div>
+
       {/* Content */}
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {loading ? (
@@ -183,6 +227,48 @@ export default function FilePanel({ token, onClose }: Props) {
             <div className="text-xs mt-2 opacity-70">
               {t('files.dropHint')}
             </div>
+          </div>
+        ) : sortedFiles ? (
+          <div className="bg-nexus-bg-2 rounded-lg border border-nexus-border overflow-hidden">
+            {sortedFiles.map((file, idx) => {
+              const fullPath = `/mnt/c/Users/libra/work/nexus/data/uploads/${file.date}/${file.name}`
+              const isCopied = copiedUrl === file.url
+              const isImage = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(file.name)
+              return (
+                <div
+                  key={`${file.date}/${file.name}`}
+                  className={`flex items-center gap-2.5 px-3 py-2.5 ${idx < sortedFiles.length - 1 ? 'border-b border-nexus-border' : ''}`}
+                >
+                  <span className="text-base">{isImage ? '🖼️' : '📄'}</span>
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="text-nexus-text text-[13px] overflow-hidden text-ellipsis whitespace-nowrap font-mono"
+                      title={file.name}
+                    >
+                      {file.name}
+                    </div>
+                    <div className="text-nexus-muted text-[11px] mt-0.5">
+                      {formatSize(file.size)} · {formatDate(file.date)}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(file.url, fullPath)}
+                    className={`rounded-md cursor-pointer text-xs flex items-center gap-1 transition-all duration-150 ${isCopied ? 'bg-nexus-success border-none text-white px-2.5 py-1.5' : 'bg-transparent border border-nexus-border text-nexus-text-2 px-2.5 py-1.5'}`}
+                    title={t('files.copyPath')}
+                  >
+                    <Icon name={isCopied ? 'check' : 'copy'} size={14} />
+                    {isCopied ? t('common.copied') : t('common.copy')}
+                  </button>
+                  <button
+                    onClick={() => deleteFile(file.date, file.name)}
+                    className="bg-transparent border-none text-nexus-error cursor-pointer p-1.5 flex items-center justify-center opacity-60"
+                    title={t('common.delete')}
+                  >
+                    <Icon name="trash" size={16} />
+                  </button>
+                </div>
+              )
+            })}
           </div>
         ) : (
           groups.map((group) => (
@@ -233,8 +319,8 @@ export default function FilePanel({ token, onClose }: Props) {
                 })}
               </div>
             </div>
-          )
-        ))}
+          ))
+        )}
       </div>
 
       {/* Footer hint */}

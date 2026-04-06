@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -498,11 +498,33 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '', cur
   // 检查是否有上级目录（简单判断：不是根目录且以 workspaceRoot 开头）
   const hasParent = currentPath !== '/' && currentPath !== ''
 
-  // 排序：目录在前，文件在后，各自按名称排序
-  const sortedEntries = [...entries].sort((a, b) => {
-    if (a.type === b.type) return a.name.localeCompare(b.name)
-    return a.type === 'dir' ? -1 : 1
-  })
+  // 排序状态：默认按文件名升序
+  const [sortKey, setSortKey] = useState<'name' | 'modified' | 'size'>('name')
+  const [sortAsc, setSortAsc] = useState(true)
+  const [showSortMenu, setShowSortMenu] = useState(false)
+
+  function handleSort(key: 'name' | 'modified' | 'size') {
+    if (sortKey === key) {
+      setSortAsc(a => !a)
+    } else {
+      setSortKey(key)
+      setSortAsc(false)
+    }
+  }
+
+  // 排序：目录在前，文件在后，各自按所选维度排序
+  const sortedEntries = useMemo(() => {
+    const dirs = entries.filter(e => e.type === 'dir')
+    const files = entries.filter(e => e.type === 'file')
+    const cmpFn = (a: FileEntry, b: FileEntry) => {
+      let cmp = 0
+      if (sortKey === 'name') cmp = a.name.localeCompare(b.name)
+      else if (sortKey === 'modified') cmp = a.mtime - b.mtime
+      else if (sortKey === 'size') cmp = (a.size ?? 0) - (b.size ?? 0)
+      return sortAsc ? cmp : -cmp
+    }
+    return [...dirs.sort(cmpFn), ...files.sort(cmpFn)]
+  }, [entries, sortKey, sortAsc])
 
   // 获取当前选中的文件条目
   const selectedEntry = selectedName && selectedName !== '..'
@@ -550,6 +572,55 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '', cur
         ))}
       </div>
 
+      {/* Nav toolbar: 上级目录 + 排序 */}
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-nexus-border flex-shrink-0">
+        {hasParent ? (
+          <button
+            onClick={navigateUp}
+            className="flex items-center gap-1.5 text-sm text-nexus-text-2 active:text-nexus-text cursor-pointer"
+          >
+            <span className="text-base">⬆️</span>
+            <span>{t('workspace.parent')}</span>
+          </button>
+        ) : (
+          <div />
+        )}
+        {/* 排序下拉按钮 */}
+        <div className="relative">
+          <button
+            onClick={() => setShowSortMenu(m => !m)}
+            className={`flex items-center gap-1 text-xs px-2 py-1 rounded border cursor-pointer transition-all duration-100 ${
+              showSortMenu
+                ? 'bg-nexus-accent border-nexus-accent text-white'
+                : 'bg-transparent border-nexus-border text-nexus-text-2'
+            }`}
+          >
+            <Icon name="sort" size={13} />
+            <span>{t(`workspace.sort.${sortKey}`)}</span>
+            <span>{sortAsc ? '↑' : '↓'}</span>
+          </button>
+          {showSortMenu && (
+            <>
+              <div className="fixed inset-0 z-[460]" onClick={() => setShowSortMenu(false)} />
+              <div className="absolute right-0 top-full mt-1 z-[470] bg-nexus-bg border border-nexus-border rounded-lg shadow-lg py-1 min-w-[120px]">
+                {(['name', 'modified', 'size'] as const).map(key => (
+                  <button
+                    key={key}
+                    onClick={() => { handleSort(key); setShowSortMenu(false) }}
+                    className={`w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 hover:bg-nexus-bg-2 transition-colors cursor-pointer ${
+                      sortKey === key ? 'text-nexus-accent' : 'text-nexus-text'
+                    }`}
+                  >
+                    <span>{t(`workspace.sort.${key}`)}</span>
+                    {sortKey === key && <span className="text-xs font-mono">{sortAsc ? '↑' : '↓'}</span>}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {loading ? (
@@ -568,20 +639,6 @@ export default function WorkspaceBrowser({ token, onClose, initialPath = '', cur
           </div>
         ) : (
           <div className="divide-y divide-nexus-border">
-            {/* 上级目录 */}
-            {hasParent && (
-              <button
-                onClick={() => handleSelect('..')}
-                onDoubleClick={navigateUp}
-                className={`w-full flex items-center gap-3 px-4 py-3 transition-colors text-left ${
-                  selectedName === '..' ? 'bg-nexus-bg-2' : 'hover:bg-nexus-bg-2'
-                }`}
-                title="Double-click to go up"
-              >
-                <span className="text-xl">⬆️</span>
-                <span className="text-nexus-text text-sm">{t('workspace.parent')}</span>
-              </button>
-            )}
             {/* 目录和文件列表 */}
             {sortedEntries.map((entry) => (
               <button

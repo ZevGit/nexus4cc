@@ -68,7 +68,12 @@
     "moveEntry": "Move to...",
     "deleteEntry": "Delete",
     "copyPath": "Copy path",
-    "deleteConfirm": "Delete \"{{name}}\"? This cannot be undone."
+    "deleteConfirm": "Delete \"{{name}}\"? This cannot be undone.",
+    "sort": {
+      "name": "Name",
+      "modified": "Modified",
+      "size": "Size"
+    }
   },
   "newChannel": {
     "title": "New Channel",
@@ -220,7 +225,13 @@
     "deleteConfirm": "Delete file \"{{filename}}\"?",
     "deleteAllConfirm": "Delete all {{count}} uploaded files? This cannot be undone.",
     "manualCopy": "Please copy manually:\n{{text}}",
-    "footerNote": "Files are stored in data/uploads/ and are not tracked by git"
+    "footerNote": "Files are stored in data/uploads/ and are not tracked by git",
+    "sortBy": "Sort",
+    "sort": {
+      "name": "Name",
+      "modified": "Modified",
+      "size": "Size"
+    }
   },
   "windowStatus": {
     "running": "Running",
