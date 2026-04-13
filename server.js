@@ -5,7 +5,7 @@ import * as pty from 'node-pty';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
 import { createServer } from 'node:http';
-import { exec, spawn, execSync } from 'child_process';
+import { exec, spawn, execSync, execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join, normalize, isAbsolute, basename } from 'path';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, statSync, rmdirSync, renameSync, cpSync, rmSync } from 'fs';
@@ -1645,23 +1645,34 @@ function ptyKey(session, windowIndex) {
 }
 
 function ensureWindowPty(session, windowIndex) {
-  const key = ptyKey(session, windowIndex);
-  if (ptyMap.has(key)) return { key, entry: ptyMap.get(key) };
-
-  // 确保 tmux session 存在
+  // Validate session exists as a real tmux session (execFileSync avoids shell expansion)
+  let safeSession = session;
   try {
-    execSync(`tmux has-session -t ${session} 2>/dev/null || tmux new-session -d -s ${session} -n shell "zsh"`);
-  } catch {}
+    execFileSync('tmux', ['has-session', '-t', session], { stdio: 'pipe' });
+  } catch {
+    // Requested session doesn't exist — fall back to default TMUX_SESSION
+    safeSession = TMUX_SESSION;
+    try {
+      execFileSync('tmux', ['has-session', '-t', TMUX_SESSION], { stdio: 'pipe' });
+    } catch {
+      // Default session also missing — create it
+      try { execFileSync('tmux', ['new-session', '-d', '-s', TMUX_SESSION, '-n', 'shell', 'zsh'], { stdio: 'pipe' }); } catch {}
+    }
+  }
+
+  const key = ptyKey(safeSession, windowIndex);
+  if (ptyMap.has(key)) return { key, entry: ptyMap.get(key) };
 
   // 检查窗口是否存在，不存在则 fallback 到第一个可用窗口
   let targetWindow = windowIndex;
   try {
-    const windows = execSync(`tmux list-windows -t ${session} -F "#I"`).toString().trim().split('\n');
+    const out = execFileSync('tmux', ['list-windows', '-t', safeSession, '-F', '#I'], { encoding: 'utf8', stdio: 'pipe' });
+    const windows = out.trim().split('\n');
     if (!windows.includes(String(windowIndex))) {
       if (windows.length > 0) {
         targetWindow = parseInt(windows[0], 10);
       } else {
-        execSync(`tmux new-window -t ${session} -n shell "zsh"`);
+        execFileSync('tmux', ['new-window', '-t', safeSession, '-n', 'shell', 'zsh'], { stdio: 'pipe' });
         targetWindow = 0;
       }
     }
@@ -1669,15 +1680,21 @@ function ensureWindowPty(session, windowIndex) {
     targetWindow = 0;
   }
 
-  const actualKey = ptyKey(session, targetWindow);
+  const actualKey = ptyKey(safeSession, targetWindow);
   if (ptyMap.has(actualKey)) return { key: actualKey, entry: ptyMap.get(actualKey) }; // reuse if fallback exists
 
-  const ptyProc = pty.spawn('tmux', ['attach-session', '-t', `${session}:${targetWindow}`], {
-    name: 'xterm-256color',
-    cols: 120,
-    rows: 30,
-    env: { ...process.env, LANG: 'C.UTF-8', TERM: 'xterm-256color' },
-  });
+  let ptyProc;
+  try {
+    ptyProc = pty.spawn('tmux', ['attach-session', '-t', `${safeSession}:${targetWindow}`], {
+      name: 'xterm-256color',
+      cols: 120,
+      rows: 30,
+      env: { ...process.env, LANG: 'C.UTF-8', TERM: 'xterm-256color' },
+    });
+  } catch (err) {
+    console.error(`pty.spawn failed for ${safeSession}:${targetWindow}:`, err.message);
+    return { key: actualKey, entry: { pty: null, clients: new Set(), clientSizes: new Map(), lastOutput: '', lastActivity: Date.now() } };
+  }
 
   const entry = { pty: ptyProc, clients: new Set(), clientSizes: new Map(), lastOutput: '', lastActivity: Date.now() };
   ptyMap.set(actualKey, entry);
@@ -1697,9 +1714,9 @@ function ensureWindowPty(session, windowIndex) {
     ptyMap.delete(actualKey);
     // 如果 window 还在，重新创建
     try {
-      const list = execSync(`tmux list-windows -t ${session} -F "#I"`).toString().trim().split('\n');
+      const list = execFileSync('tmux', ['list-windows', '-t', safeSession, '-F', '#I'], { encoding: 'utf8', stdio: 'pipe' }).trim().split('\n');
       if (list.includes(String(targetWindow))) {
-        setTimeout(() => ensureWindowPty(session, targetWindow), 100);
+        setTimeout(() => ensureWindowPty(safeSession, targetWindow), 100);
       }
     } catch {}
   });
