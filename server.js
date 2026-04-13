@@ -325,11 +325,13 @@ app.get('/api/projects', apiLimiter, authMiddleware, (req, res) => {
   execFile('tmux', ['list-sessions', '-F', '#{session_name}|#{session_windows}|#{session_attached}'], (err, stdout) => {
     if (err) return res.json([]);
     const projects = stdout.trim().split('\n').filter(Boolean).map(line => {
-      const [name, windows] = line.split('|'); let path = '';
+      const [name, windows] = line.split('|'); let path = ''; let valid = true;
+      try { execFileSync('tmux', ['show-environment', '-t', name], { encoding: 'utf8' }); } catch { valid = false; }
+      if (!valid) return null;
       try { const e = execFileSync('tmux', ['show-environment', '-t', name, 'NEXUS_CWD'], { encoding: 'utf8' }).trim(); const m = e.match(/^NEXUS_CWD=(.+)$/); if (m) path = m[1]; } catch {}
       if (!path && windows !== '0') { try { const p = execFileSync('tmux', ['list-windows', '-t', name, '-F', '#{pane_current_path}'], { encoding: 'utf8' }).trim(); if (p) path = p.split('\n')[0]; } catch {} }
       return { name, path: path || DEFAULT_WORKSPACE, active: name === TMUX_SESSION, channelCount: Number(windows) || 0 };
-    }); projects.reverse(); res.json(projects);
+    }).filter(Boolean); projects.reverse(); res.json(projects);
   });
 });
 app.get('/api/session-cwd', apiLimiter, authMiddleware, (req, res) => {
