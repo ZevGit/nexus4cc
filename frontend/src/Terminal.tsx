@@ -11,6 +11,88 @@ import GhostShield from './GhostShield'
 import { Icon } from './icons'
 import { getWindowStatus, STATUS_DOT_COLOR, STATUS_DOT_TITLE } from './windowStatus'
 
+// ANSI 256-color palette (0-15 standard, 16-231 6x6x6 cube, 232-255 grayscale)
+const ANSI256: string[] = (() => {
+  const c = [
+    '#000000','#cc0000','#4e9a06','#c4a000','#3465a4','#75507b','#06989a','#d3d7cf',
+    '#555753','#ef2929','#8ae234','#fce94f','#729fcf','#ad7fa8','#34e2e2','#eeeeec',
+  ]
+  const h = (v: number) => v.toString(16).padStart(2, '0')
+  for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) {
+    const rv = r ? r * 40 + 55 : 0, gv = g ? g * 40 + 55 : 0, bv = b ? b * 40 + 55 : 0
+    c.push(`#${h(rv)}${h(gv)}${h(bv)}`)
+  }
+  for (let i = 0; i < 24; i++) { const v = h(8 + i * 10); c.push(`#${v}${v}${v}`) }
+  return c
+})()
+
+function ansiToHtml(raw: string): string {
+  const style = { fg: '', bg: '', bold: false, italic: false, dim: false }
+  const out: string[] = []
+  let buf = ''
+
+  const flush = () => {
+    if (!buf) return
+    const esc = buf.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    const css: string[] = []
+    if (style.fg) css.push(`color:${style.fg}`)
+    if (style.bg) css.push(`background-color:${style.bg}`)
+    if (style.bold) css.push('font-weight:700')
+    if (style.italic) css.push('font-style:italic')
+    if (style.dim) css.push('opacity:0.6')
+    out.push(css.length ? `<span style="${css.join(';')}">${esc}</span>` : esc)
+    buf = ''
+  }
+
+  const applyParams = (params: string) => {
+    const codes = params.split(';').map(s => parseInt(s, 10) || 0)
+    let j = 0
+    while (j < codes.length) {
+      const c = codes[j]
+      if (c === 0) { style.fg = ''; style.bg = ''; style.bold = false; style.italic = false; style.dim = false }
+      else if (c === 1) style.bold = true
+      else if (c === 2) style.dim = true
+      else if (c === 3) style.italic = true
+      else if (c === 22) { style.bold = false; style.dim = false }
+      else if (c === 23) style.italic = false
+      else if (c >= 30 && c <= 37) style.fg = ANSI256[c - 30]
+      else if (c === 39) style.fg = ''
+      else if (c >= 40 && c <= 47) style.bg = ANSI256[c - 40]
+      else if (c === 49) style.bg = ''
+      else if (c >= 90 && c <= 97) style.fg = ANSI256[c - 90 + 8]
+      else if (c >= 100 && c <= 107) style.bg = ANSI256[c - 100 + 8]
+      else if (c === 38 && codes[j + 1] === 5 && j + 2 < codes.length) { style.fg = ANSI256[codes[j + 2]] ?? ''; j += 2 }
+      else if (c === 38 && codes[j + 1] === 2 && j + 4 < codes.length) { style.fg = `rgb(${codes[j+2]},${codes[j+3]},${codes[j+4]})`; j += 4 }
+      else if (c === 48 && codes[j + 1] === 5 && j + 2 < codes.length) { style.bg = ANSI256[codes[j + 2]] ?? ''; j += 2 }
+      else if (c === 48 && codes[j + 1] === 2 && j + 4 < codes.length) { style.bg = `rgb(${codes[j+2]},${codes[j+3]},${codes[j+4]})`; j += 4 }
+      j++
+    }
+  }
+
+  let i = 0
+  const s = raw.replace(/\r/g, '')
+  while (i < s.length) {
+    if (s[i] !== '\x1b') { buf += s[i++]; continue }
+    // find CSI terminator
+    if (s[i + 1] === '[') {
+      let end = i + 2
+      while (end < s.length && !/[A-Za-z]/.test(s[end])) end++
+      const term = s[end]
+      const params = s.slice(i + 2, end)
+      i = end + 1
+      if (term === 'm') { flush(); applyParams(params) }
+      // other CSI sequences: skip silently
+    } else {
+      // non-CSI escape: skip to next letter
+      i += 2
+      while (i < s.length && !/[A-Za-z]/.test(s[i])) i++
+      i++
+    }
+  }
+  flush()
+  return out.join('')
+}
+
 const SessionManager = lazy(() => import('./SessionManager'))
 const SessionManagerV2 = lazy(() => import('./SessionManagerV2'))
 const WorkspaceSelector = lazy(() => import('./WorkspaceSelector'))
@@ -149,6 +231,8 @@ export default function Terminal({ token }: Props) {
   const swipeUpAccumRef = useRef(0)
   const scrollbackOverlayRef = useRef<HTMLDivElement>(null)
   const triggerScrollbackRef = useRef<() => void>(() => {})
+  const scrollbackPrefetchRef = useRef<Promise<{ content: string }> | null>(null)
+  const scrollbackCacheRef = useRef<string | null>(null)
   const pausePollingRef = useRef(false)
   const activeWindowIndexRef = useRef(0)
   const windowsInitializedRef = useRef(false)
@@ -996,6 +1080,20 @@ export default function Terminal({ token }: Props) {
           touchLastY = y
           if (deltaY < 0) {  // finger DOWN = swipe down = view history
             swipeUpAccumRef.current += -deltaY
+            if (swipeUpAccumRef.current > 10 && !scrollbackPrefetchRef.current && scrollbackCacheRef.current === null) {
+              // Pre-fetch while gesture is still building up
+              const wi = activeWindowIndexRef.current
+              const s = activeTmuxSessionRef.current
+              scrollbackPrefetchRef.current = fetch(`/api/sessions/${wi}/scrollback?session=${encodeURIComponent(s)}&lines=3000`, {
+                headers: { Authorization: `Bearer ${token}` },
+              }).then(r => r.ok ? r.json() : Promise.reject(r.status))
+                .then((data: { content: string }) => {
+                  scrollbackCacheRef.current = data.content.trimEnd()
+                  scrollbackPrefetchRef.current = null
+                  return data
+                })
+                .catch(() => { scrollbackPrefetchRef.current = null; return { content: '' } })
+            }
             if (swipeUpAccumRef.current > 40) {
               triggerScrollbackRef.current()
             }
@@ -1365,6 +1463,8 @@ export default function Terminal({ token }: Props) {
     showScrollbackRef.current = false
     setShowScrollback(false)
     setScrollbackContent('')
+    scrollbackCacheRef.current = null
+    scrollbackPrefetchRef.current = null
   }
 
   function handleOverlayScroll(e: React.UIEvent<HTMLDivElement>) {
@@ -1380,14 +1480,24 @@ export default function Terminal({ token }: Props) {
     showScrollbackRef.current = true
     swipeUpAccumRef.current = 0
     setShowScrollback(true)
-    setScrollbackLoading(true)
 
+    // Use pre-fetched cache if available (no loading flash)
+    if (scrollbackCacheRef.current !== null) {
+      setScrollbackContent(scrollbackCacheRef.current)
+      setScrollbackLoading(false)
+      return
+    }
+
+    setScrollbackLoading(true)
     const wi = activeWindowIndexRef.current
     const s = activeTmuxSessionRef.current
-    fetch(`/api/sessions/${wi}/scrollback?session=${encodeURIComponent(s)}&lines=3000`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    const promise = scrollbackPrefetchRef.current ??
+      fetch(`/api/sessions/${wi}/scrollback?session=${encodeURIComponent(s)}&lines=3000`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(r => r.ok ? r.json() : Promise.reject(r.status))
+
+    scrollbackPrefetchRef.current = null
+    promise
       .then(({ content }: { content: string }) => {
         setScrollbackContent(content.trimEnd())
         setScrollbackLoading(false)
@@ -1911,9 +2021,11 @@ export default function Terminal({ token }: Props) {
               {scrollbackLoading ? (
                 <div className="text-center p-8" style={{ color: termMuted, fontFamily: termFontFamily, fontSize: termFontSize }}>加载中...</div>
               ) : (
-                <pre className="m-0 p-0 whitespace-pre-wrap break-all leading-tight" style={{ fontFamily: termFontFamily, fontSize: termFontSize, color: termFg }}>
-                  {scrollbackContent}
-                </pre>
+                <pre
+                  className="m-0 p-0 whitespace-pre-wrap break-all leading-tight"
+                  style={{ fontFamily: termFontFamily, fontSize: termFontSize, color: termFg }}
+                  dangerouslySetInnerHTML={{ __html: ansiToHtml(scrollbackContent) }}
+                />
               )}
             </div>
           </div>

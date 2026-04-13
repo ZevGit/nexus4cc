@@ -869,7 +869,7 @@ app.get('/api/sessions/:id/scrollback', authMiddleware, (req, res) => {
   const windowIndex = parseInt(req.params.id, 10)
   const session = req.query.session || TMUX_SESSION
   const lines = Math.min(parseInt(req.query.lines || '3000', 10), 10000)
-  exec(`tmux capture-pane -p -S -${lines} -t ${session}:${windowIndex} 2>/dev/null`, (err, stdout) => {
+  exec(`tmux capture-pane -e -p -S -${lines} -t ${session}:${windowIndex} 2>/dev/null`, (err, stdout) => {
     if (err) return res.status(500).json({ error: err.message })
     // trim trailing spaces tmux pads to pane width
     const content = stdout.split('\n').map(l => l.trimEnd()).join('\n')
