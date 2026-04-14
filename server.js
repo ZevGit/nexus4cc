@@ -59,6 +59,22 @@ if (!JWT_SECRET || !ACC_PASSWORD_HASH) {
   process.exit(1);
 }
 
+function commandExists(cmd) {
+  try {
+    execSync(`command -v ${cmd} >/dev/null 2>&1`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const INTERACTIVE_SHELL = commandExists('zsh') ? 'zsh' : 'bash';
+const INTERACTIVE_SHELL_CMD = `exec ${INTERACTIVE_SHELL} -i`;
+
+function buildInteractiveShellCmd(prefix = '') {
+  return `${prefix}${INTERACTIVE_SHELL_CMD}`;
+}
+
 // 静态文件：frontend/dist 和 public
 app.use(express.static(join(__dirname, 'public')));
 app.use(express.static(join(__dirname, 'frontend', 'dist')));
@@ -135,19 +151,19 @@ app.post('/api/windows', authMiddleware, (req, res) => {
 
   let shellCmd;
   if (shell_type === 'bash') {
-    shellCmd = `${proxyPrefix}exec zsh -i`;
+    shellCmd = buildInteractiveShellCmd(proxyPrefix);
   } else {
     if (profile) {
       const runScript = join(__dirname, 'nexus-run-claude.sh');
       shellCmd = `${proxyPrefix}bash "${runScript}" ${profile} ${cwd}`;
     } else {
-      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; exec zsh -i`;
+      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; ${INTERACTIVE_SHELL_CMD}`;
     }
   }
 
   // 确保 tmux session 存在
   try {
-    execSync(`tmux has-session -t ${tmuxSession} 2>/dev/null || tmux new-session -d -s ${tmuxSession} -n shell "zsh"`);
+    execSync(`tmux has-session -t ${tmuxSession} 2>/dev/null || tmux new-session -d -s ${tmuxSession} -n shell "${INTERACTIVE_SHELL}"`);
   } catch {}
 
   // 将代理变量设置到 tmux session 环境
@@ -168,7 +184,7 @@ app.post('/api/windows', authMiddleware, (req, res) => {
 // body: { rel_path, shell_type?, profile?, session? }
 //   shell_type: 'claude' | 'bash' (default: 'claude')
 //   当 shell_type='claude' 时，profile 可选，使用 nexus-run-claude.sh 启动
-//   当 shell_type='bash' 时，直接启动 bash
+//   当 shell_type='bash' 时，启动本地 shell（优先 zsh，不存在时回退 bash）
 app.post('/api/sessions', authMiddleware, (req, res) => {
   const { rel_path, shell_type = 'claude', profile, session } = req.body || {};
   const tmuxSession = session || TMUX_SESSION;
@@ -191,19 +207,19 @@ app.post('/api/sessions', authMiddleware, (req, res) => {
 
   let shellCmd;
   if (shell_type === 'bash') {
-    shellCmd = `${proxyPrefix}exec zsh -i`;
+    shellCmd = buildInteractiveShellCmd(proxyPrefix);
   } else {
     if (profile) {
       const runScript = join(__dirname, 'nexus-run-claude.sh');
       shellCmd = `${proxyPrefix}bash "${runScript}" ${profile} ${cwd}`;
     } else {
-      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; exec zsh -i`;
+      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; ${INTERACTIVE_SHELL_CMD}`;
     }
   }
 
   // 确保 tmux session 存在
   try {
-    execSync(`tmux has-session -t ${tmuxSession} 2>/dev/null || tmux new-session -d -s ${tmuxSession} -n shell "zsh"`);
+    execSync(`tmux has-session -t ${tmuxSession} 2>/dev/null || tmux new-session -d -s ${tmuxSession} -n shell "${INTERACTIVE_SHELL}"`);
   } catch {}
 
   // 将代理变量设置到 tmux session 环境，新窗口才能继承
@@ -929,13 +945,13 @@ app.post('/api/projects', authMiddleware, (req, res) => {
 
   let shellCmd
   if (shell_type === 'bash') {
-    shellCmd = `${proxyPrefix}exec zsh -i`
+    shellCmd = buildInteractiveShellCmd(proxyPrefix)
   } else {
     if (profile) {
       const runScript = join(__dirname, 'nexus-run-claude.sh')
       shellCmd = `${proxyPrefix}bash "${runScript}" ${profile} ${cwd}`
     } else {
-      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; exec zsh -i`
+      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; ${INTERACTIVE_SHELL_CMD}`
     }
   }
 
@@ -1001,19 +1017,19 @@ app.post('/api/projects/:name/channels', authMiddleware, (req, res) => {
 
   let shellCmd
   if (shell_type === 'bash') {
-    shellCmd = `${proxyPrefix}exec zsh -i`
+    shellCmd = buildInteractiveShellCmd(proxyPrefix)
   } else {
     if (profile) {
       const runScript = join(__dirname, 'nexus-run-claude.sh')
       shellCmd = `${proxyPrefix}bash "${runScript}" ${profile} ${cwd}`
     } else {
-      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; exec zsh -i`
+      shellCmd = `${proxyPrefix}claude --dangerously-skip-permissions; ${INTERACTIVE_SHELL_CMD}`
     }
   }
 
   // 确保 session 存在
   try {
-    execSync(`tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${sessionName} -n shell "zsh"`)
+    execSync(`tmux has-session -t ${sessionName} 2>/dev/null || tmux new-session -d -s ${sessionName} -n shell "${INTERACTIVE_SHELL}"`)
   } catch {}
 
   // 创建新 window
@@ -1130,7 +1146,7 @@ app.delete('/api/sessions/:id', authMiddleware, (req, res) => {
     const windowCount = parseInt(countOut.trim()) || 0
     if (windowCount <= 1) {
       // Last window: create a new shell first to keep the session alive
-      exec(`tmux new-window -t ${session} -n shell "zsh"`, () => {
+      exec(`tmux new-window -t ${session} -n shell "${INTERACTIVE_SHELL}"`, () => {
         exec(`tmux kill-window -t ${session}:${index}`, (err) => {
           if (err) return res.status(500).json({ error: err.message })
           res.json({ ok: true })
@@ -1606,7 +1622,7 @@ function ensureWindowPty(session, windowIndex) {
 
   // 确保 tmux session 存在
   try {
-    execSync(`tmux has-session -t ${session} 2>/dev/null || tmux new-session -d -s ${session} -n shell "zsh"`);
+    execSync(`tmux has-session -t ${session} 2>/dev/null || tmux new-session -d -s ${session} -n shell "${INTERACTIVE_SHELL}"`);
   } catch {}
 
   // 检查窗口是否存在，不存在则 fallback 到第一个可用窗口
@@ -1617,7 +1633,7 @@ function ensureWindowPty(session, windowIndex) {
       if (windows.length > 0) {
         targetWindow = parseInt(windows[0], 10);
       } else {
-        execSync(`tmux new-window -t ${session} -n shell "zsh"`);
+        execSync(`tmux new-window -t ${session} -n shell "${INTERACTIVE_SHELL}"`);
         targetWindow = 0;
       }
     }
@@ -1769,7 +1785,7 @@ server.listen(Number(PORT), '0.0.0.0', () => {
   // 启动时确保默认 tmux session 存在，窗口名使用 WORKSPACE_ROOT 的目录名
   try {
     const defaultWindowName = WORKSPACE_ROOT.replace(/^\/+|\/+$/, '').split('/').pop() || '~'
-    execSync(`tmux has-session -t ${TMUX_SESSION} 2>/dev/null || tmux new-session -d -s ${TMUX_SESSION} -n "${defaultWindowName}" -c "${WORKSPACE_ROOT}" "zsh"`);
+    execSync(`tmux has-session -t ${TMUX_SESSION} 2>/dev/null || tmux new-session -d -s ${TMUX_SESSION} -n "${defaultWindowName}" -c "${WORKSPACE_ROOT}" "${INTERACTIVE_SHELL}"`);
     console.log(`tmux session '${TMUX_SESSION}' ready`);
   } catch (e) { console.warn('tmux session init failed:', e.message); }
 });
