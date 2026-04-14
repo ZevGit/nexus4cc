@@ -224,6 +224,7 @@ export default function Terminal({ token }: Props) {
   const hasConnectedRef = useRef(false)
   const [showFiles, setShowFiles] = useState(false)
   const [showWorkspace, setShowWorkspace] = useState(false)
+  const [copySheetText, setCopySheetText] = useState<string | null>(null)
   const [showScrollback, setShowScrollback] = useState(false)
   const [scrollbackContent, setScrollbackContent] = useState('')
   const [scrollbackLoading, setScrollbackLoading] = useState(false)
@@ -1053,8 +1054,8 @@ export default function Terminal({ token }: Props) {
     }
 
     function onTouchMove(e: TouchEvent) {
-      e.preventDefault()
       if (isPinching && e.touches.length === 2) {
+        e.preventDefault()
         const dist = getTouchDist(e)
         const scale = dist / pinchStartDist
         const newSize = Math.round(Math.max(8, Math.min(32, pinchStartFontSize * scale)))
@@ -1073,8 +1074,9 @@ export default function Terminal({ token }: Props) {
           const dy = Math.abs(e.touches[0].clientY - touchStartY)
           if (dx > 8 || dy > 8) swipeAxis = dx > dy ? 'horizontal' : 'vertical'
         }
-        if (swipeAxis === 'horizontal') return
+        if (swipeAxis === 'horizontal') { e.preventDefault(); return }
         if (swipeAxis === 'vertical' && !showScrollbackRef.current) {
+          e.preventDefault()
           const y = e.touches[0].clientY
           const deltaY = touchLastY - y  // positive = finger UP = want older content
           touchLastY = y
@@ -1128,6 +1130,9 @@ export default function Terminal({ token }: Props) {
         return
       }
       if (Math.abs(dy) < TAP_THRESHOLD && Math.abs(dx) < TAP_THRESHOLD) {
+        // Prevent the subsequent click event so xterm's internal handler
+        // doesn't steal focus from our managed input.
+        e.preventDefault()
         const xtermTa = termRef.current?.textarea
         // 工具栏展开时收起工具栏；若键盘也可见则一并收起
         if (toolbarCollapsedRef.current === false) {
@@ -1165,7 +1170,7 @@ export default function Terminal({ token }: Props) {
 
     container.addEventListener('touchstart', onTouchStart, { passive: true })
     container.addEventListener('touchmove', onTouchMove, { passive: false })
-    container.addEventListener('touchend', onTouchEnd, { passive: true })
+    container.addEventListener('touchend', onTouchEnd, { passive: false })
 
     // F-21: 拖拽上传文件
     function onDragOver(e: DragEvent) {
@@ -1531,6 +1536,7 @@ export default function Terminal({ token }: Props) {
     onOpenWorkspace: () => setShowWorkspace(true),
     onUpload: handleFileUpload,
     onUploadFile: uploadFile,
+    onShowCopySheet: (text: string) => setCopySheetText(text),
     collapsed: toolbarCollapsed,
     onCollapsedChange: setToolbarCollapsed,
   }
@@ -1724,7 +1730,7 @@ export default function Terminal({ token }: Props) {
               )}
             </div>
             <div className="flex-1 flex flex-col min-w-0 relative">
-              <div ref={containerRef} className="flex-1 overflow-hidden relative" onClick={() => termRef.current?.textarea?.focus()} />
+              <div ref={containerRef} className="flex-1 overflow-hidden relative" />
               {isConnecting && (
                 <div className="absolute inset-0 bg-nexus-bg flex flex-col items-center justify-center gap-3 z-10">
                   <div className="w-8 h-8 border-[3px] border-nexus-border border-t-nexus-accent rounded-full animate-spin" />
@@ -1877,6 +1883,38 @@ export default function Terminal({ token }: Props) {
             currentSession={activeTmuxSession}
           />
         </Suspense>
+      )}
+      {copySheetText !== null && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/40"
+          onClick={() => setCopySheetText(null)}
+        >
+          <div
+            className="w-full max-w-lg bg-nexus-bg border-t border-nexus-border rounded-t-xl p-4 max-h-[60vh] flex flex-col gap-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-nexus-text font-medium text-sm">Terminal Content</span>
+              <button
+                className="text-xs px-3 py-1 rounded bg-nexus-accent text-white"
+                onClick={() => setCopySheetText(null)}
+              >
+                Close
+              </button>
+            </div>
+            <textarea
+              readOnly
+              value={copySheetText}
+              className="w-full flex-1 min-h-[200px] bg-nexus-surface text-nexus-text text-xs font-mono p-3 rounded border border-nexus-border resize-none"
+              style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
+              onFocus={(e) => {
+                e.currentTarget.select()
+                e.currentTarget.setSelectionRange(0, e.currentTarget.value.length)
+              }}
+            />
+            <p className="text-nexus-text-2 text-xs text-center">Long press to select and copy</p>
+          </div>
+        </div>
       )}
       {showSettings && (
         <Suspense fallback={null}>
