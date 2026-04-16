@@ -11,88 +11,6 @@ import GhostShield from './GhostShield'
 import { Icon } from './icons'
 import { getWindowStatus, STATUS_DOT_COLOR, STATUS_DOT_TITLE } from './windowStatus'
 
-// ANSI 256-color palette (0-15 standard, 16-231 6x6x6 cube, 232-255 grayscale)
-const ANSI256: string[] = (() => {
-  const c = [
-    '#000000','#cc0000','#4e9a06','#c4a000','#3465a4','#75507b','#06989a','#d3d7cf',
-    '#555753','#ef2929','#8ae234','#fce94f','#729fcf','#ad7fa8','#34e2e2','#eeeeec',
-  ]
-  const h = (v: number) => v.toString(16).padStart(2, '0')
-  for (let r = 0; r < 6; r++) for (let g = 0; g < 6; g++) for (let b = 0; b < 6; b++) {
-    const rv = r ? r * 40 + 55 : 0, gv = g ? g * 40 + 55 : 0, bv = b ? b * 40 + 55 : 0
-    c.push(`#${h(rv)}${h(gv)}${h(bv)}`)
-  }
-  for (let i = 0; i < 24; i++) { const v = h(8 + i * 10); c.push(`#${v}${v}${v}`) }
-  return c
-})()
-
-function ansiToHtml(raw: string): string {
-  const style = { fg: '', bg: '', bold: false, italic: false, dim: false }
-  const out: string[] = []
-  let buf = ''
-
-  const flush = () => {
-    if (!buf) return
-    const esc = buf.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    const css: string[] = []
-    if (style.fg) css.push(`color:${style.fg}`)
-    if (style.bg) css.push(`background-color:${style.bg}`)
-    if (style.bold) css.push('font-weight:700')
-    if (style.italic) css.push('font-style:italic')
-    if (style.dim) css.push('opacity:0.6')
-    out.push(css.length ? `<span style="${css.join(';')}">${esc}</span>` : esc)
-    buf = ''
-  }
-
-  const applyParams = (params: string) => {
-    const codes = params.split(';').map(s => parseInt(s, 10) || 0)
-    let j = 0
-    while (j < codes.length) {
-      const c = codes[j]
-      if (c === 0) { style.fg = ''; style.bg = ''; style.bold = false; style.italic = false; style.dim = false }
-      else if (c === 1) style.bold = true
-      else if (c === 2) style.dim = true
-      else if (c === 3) style.italic = true
-      else if (c === 22) { style.bold = false; style.dim = false }
-      else if (c === 23) style.italic = false
-      else if (c >= 30 && c <= 37) style.fg = ANSI256[c - 30]
-      else if (c === 39) style.fg = ''
-      else if (c >= 40 && c <= 47) style.bg = ANSI256[c - 40]
-      else if (c === 49) style.bg = ''
-      else if (c >= 90 && c <= 97) style.fg = ANSI256[c - 90 + 8]
-      else if (c >= 100 && c <= 107) style.bg = ANSI256[c - 100 + 8]
-      else if (c === 38 && codes[j + 1] === 5 && j + 2 < codes.length) { style.fg = ANSI256[codes[j + 2]] ?? ''; j += 2 }
-      else if (c === 38 && codes[j + 1] === 2 && j + 4 < codes.length) { style.fg = `rgb(${codes[j+2]},${codes[j+3]},${codes[j+4]})`; j += 4 }
-      else if (c === 48 && codes[j + 1] === 5 && j + 2 < codes.length) { style.bg = ANSI256[codes[j + 2]] ?? ''; j += 2 }
-      else if (c === 48 && codes[j + 1] === 2 && j + 4 < codes.length) { style.bg = `rgb(${codes[j+2]},${codes[j+3]},${codes[j+4]})`; j += 4 }
-      j++
-    }
-  }
-
-  let i = 0
-  const s = raw.replace(/\r/g, '')
-  while (i < s.length) {
-    if (s[i] !== '\x1b') { buf += s[i++]; continue }
-    // find CSI terminator
-    if (s[i + 1] === '[') {
-      let end = i + 2
-      while (end < s.length && !/[A-Za-z]/.test(s[end])) end++
-      const term = s[end]
-      const params = s.slice(i + 2, end)
-      i = end + 1
-      if (term === 'm') { flush(); applyParams(params) }
-      // other CSI sequences: skip silently
-    } else {
-      // non-CSI escape: skip to next letter
-      i += 2
-      while (i < s.length && !/[A-Za-z]/.test(s[i])) i++
-      i++
-    }
-  }
-  flush()
-  return out.join('')
-}
-
 const SessionManager = lazy(() => import('./SessionManager'))
 const SessionManagerV2 = lazy(() => import('./SessionManagerV2'))
 const WorkspaceSelector = lazy(() => import('./WorkspaceSelector'))
@@ -224,7 +142,6 @@ export default function Terminal({ token }: Props) {
   const hasConnectedRef = useRef(false)
   const [showFiles, setShowFiles] = useState(false)
   const [showWorkspace, setShowWorkspace] = useState(false)
-  const [copySheetText, setCopySheetText] = useState<string | null>(null)
   const [showScrollback, setShowScrollback] = useState(false)
   const [scrollbackContent, setScrollbackContent] = useState('')
   const [scrollbackLoading, setScrollbackLoading] = useState(false)
@@ -232,8 +149,6 @@ export default function Terminal({ token }: Props) {
   const swipeUpAccumRef = useRef(0)
   const scrollbackOverlayRef = useRef<HTMLDivElement>(null)
   const triggerScrollbackRef = useRef<() => void>(() => {})
-  const scrollbackPrefetchRef = useRef<Promise<{ content: string }> | null>(null)
-  const scrollbackCacheRef = useRef<string | null>(null)
   const pausePollingRef = useRef(false)
   const activeWindowIndexRef = useRef(0)
   const windowsInitializedRef = useRef(false)
@@ -270,8 +185,17 @@ export default function Terminal({ token }: Props) {
 
   // F-18: 多 tmux session 支持
   const [tmuxSessions, setTmuxSessions] = useState<string[]>([])
-  const [activeTmuxSession, setActiveTmuxSession] = useState<string>(() => localStorage.getItem('nexus_session') || '~')
-  const [wsSessionKey, setWsSessionKey] = useState<string>(() => localStorage.getItem('nexus_session') || '~')
+  const [activeTmuxSession, setActiveTmuxSession] = useState<string>(() => {
+    const cached = localStorage.getItem('nexus_session')
+    // 如果缓存的是无效的旧默认值 '~'，忽略它，等待服务端返回
+    if (cached && cached !== '~') return cached
+    return '' // 空字符串表示等待服务端返回
+  })
+  const [wsSessionKey, setWsSessionKey] = useState<string>(() => {
+    const cached = localStorage.getItem('nexus_session')
+    if (cached && cached !== '~') return cached
+    return ''
+  })
   const activeTmuxSessionRef = useRef(activeTmuxSession)
   activeTmuxSessionRef.current = activeTmuxSession
   const sessionManagerRef = useRef<SessionManagerV2Handle>(null)
@@ -285,19 +209,22 @@ export default function Terminal({ token }: Props) {
   }
   const [projects, setProjects] = useState<ProjectInfo[]>([])
 
-
   // 加载服务端默认 session
   useEffect(() => {
     fetch('/api/config', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
-        if (d.tmuxSession && !localStorage.getItem('nexus_session')) {
-          setActiveTmuxSession(d.tmuxSession)
-          setWsSessionKey(d.tmuxSession)
+        if (d.tmuxSession) {
+          // 如果当前 session 为空或是旧无效值，使用服务端返回的默认 session
+          if (!activeTmuxSession || activeTmuxSession === '~') {
+            setActiveTmuxSession(d.tmuxSession)
+            setWsSessionKey(d.tmuxSession)
+            localStorage.setItem('nexus_session', d.tmuxSession)
+          }
         }
       })
       .catch(() => {})
-  }, [token])
+  }, [token, activeTmuxSession])
 
   // 获取所有 tmux sessions 和 projects
   useEffect(() => {
@@ -650,13 +577,13 @@ export default function Terminal({ token }: Props) {
     }
   }
 
-  async function createSession(relPath: string, shellType: 'claude' | 'bash' = 'claude', profile?: string) {
+  async function createSession(relPath: string, shellType: 'claude' | 'bash' = 'claude') {
     try {
       // F-20: 使用 /api/projects 创建新的 project（tmux session）
       const r = await fetch('/api/projects', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: relPath, shell_type: shellType, profile }),
+        body: JSON.stringify({ path: relPath, shell_type: shellType }),
       })
       if (r.ok) {
         const { name: newProjectName } = await r.json()
@@ -669,7 +596,7 @@ export default function Terminal({ token }: Props) {
   }
 
   // F-19: 创建新窗口（继承当前项目目录）
-  async function createWindow(shellType: 'claude' | 'bash' = 'claude', profile?: string) {
+  async function createWindow(shellType: 'claude' | 'bash' = 'claude') {
     try {
       const session = activeTmuxSessionRef.current
       // 获取当前 project 的路径
@@ -679,7 +606,7 @@ export default function Terminal({ token }: Props) {
       const r = await fetch(`/api/projects/${encodeURIComponent(session)}/channels`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ shell_type: shellType, profile, path: projectPath }),
+        body: JSON.stringify({ shell_type: shellType, path: projectPath }),
       })
       if (r.ok) {
         const { name: newWindowName } = await r.json()
@@ -707,9 +634,9 @@ export default function Terminal({ token }: Props) {
     setShowNewSession(true)
   }
 
-  function handleCreateSession(path: string, shellType: 'claude' | 'bash', profile?: string) {
+  function handleCreateSession(path: string, shellType: 'claude' | 'bash') {
     setShowNewSession(false)
-    createSession(path, shellType, profile)
+    createSession(path, shellType)
   }
 
   // F-19: 处理新窗口创建（打开配置对话框）
@@ -717,9 +644,9 @@ export default function Terminal({ token }: Props) {
     setShowNewWindow(true)
   }
 
-  function handleNewWindowConfirm(shellType: 'claude' | 'bash', profile?: string) {
+  function handleNewWindowConfirm(shellType: 'claude' | 'bash') {
     setShowNewWindow(false)
-    createWindow(shellType, profile)
+    createWindow(shellType)
     setTimeout(() => sessionManagerRef.current?.refresh(), 500)
   }
 
@@ -755,8 +682,7 @@ export default function Terminal({ token }: Props) {
     formData.append('file', file)
     formData.append('originalName', file.name)
     try {
-      const sessionParam = `session=${encodeURIComponent(activeTmuxSessionRef.current)}`
-      const url = overwrite ? `/api/files/upload?overwrite=1&${sessionParam}` : `/api/files/upload?${sessionParam}`
+      const url = overwrite ? '/api/files/upload?overwrite=1' : '/api/files/upload'
       const res = await fetch(url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -881,18 +807,10 @@ export default function Terminal({ token }: Props) {
       // IME 组合输入期间不拦截
       if (e.isComposing) return
 
-      // 仅在PC宽屏模式处理
+      // 仅在PC宽屏模式且没有打开弹层时处理
       if (window.innerWidth < 768) return
-
-      // 焦点在终端容器外的 input/textarea/contenteditable 时不拦截
-      // 用 activeElement 而非 overlay 状态变量，避免 stale closure 问题
-      const activeEl = document.activeElement
-      const isXtermInput = containerRef.current?.contains(activeEl)
-      if (!isXtermInput && activeEl && (
-        activeEl.tagName === 'INPUT' ||
-        activeEl.tagName === 'TEXTAREA' ||
-        (activeEl as HTMLElement).isContentEditable
-      )) return
+      const anyOverlayOpen = showSessionDrawer || showSettings || showGeneralSettings || showNewSession || showNewWindow || showScrollback || showSessionManagerV2 || showFiles
+      if (anyOverlayOpen) return
 
       // 可打印字符（无修饰键）：不拦截，让 xterm 原生处理 → onData 回调发送
       // 这样浏览器 IME 才能正常工作（compositionstart → compositionend → onData）
@@ -1054,8 +972,8 @@ export default function Terminal({ token }: Props) {
     }
 
     function onTouchMove(e: TouchEvent) {
+      e.preventDefault()
       if (isPinching && e.touches.length === 2) {
-        e.preventDefault()
         const dist = getTouchDist(e)
         const scale = dist / pinchStartDist
         const newSize = Math.round(Math.max(8, Math.min(32, pinchStartFontSize * scale)))
@@ -1074,28 +992,13 @@ export default function Terminal({ token }: Props) {
           const dy = Math.abs(e.touches[0].clientY - touchStartY)
           if (dx > 8 || dy > 8) swipeAxis = dx > dy ? 'horizontal' : 'vertical'
         }
-        if (swipeAxis === 'horizontal') { e.preventDefault(); return }
+        if (swipeAxis === 'horizontal') return
         if (swipeAxis === 'vertical' && !showScrollbackRef.current) {
-          e.preventDefault()
           const y = e.touches[0].clientY
           const deltaY = touchLastY - y  // positive = finger UP = want older content
           touchLastY = y
           if (deltaY < 0) {  // finger DOWN = swipe down = view history
             swipeUpAccumRef.current += -deltaY
-            if (swipeUpAccumRef.current > 10 && !scrollbackPrefetchRef.current && scrollbackCacheRef.current === null) {
-              // Pre-fetch while gesture is still building up
-              const wi = activeWindowIndexRef.current
-              const s = activeTmuxSessionRef.current
-              scrollbackPrefetchRef.current = fetch(`/api/sessions/${wi}/scrollback?session=${encodeURIComponent(s)}&lines=3000`, {
-                headers: { Authorization: `Bearer ${token}` },
-              }).then(r => r.ok ? r.json() : Promise.reject(r.status))
-                .then((data: { content: string }) => {
-                  scrollbackCacheRef.current = data.content.trimEnd()
-                  scrollbackPrefetchRef.current = null
-                  return data
-                })
-                .catch(() => { scrollbackPrefetchRef.current = null; return { content: '' } })
-            }
             if (swipeUpAccumRef.current > 40) {
               triggerScrollbackRef.current()
             }
@@ -1130,9 +1033,6 @@ export default function Terminal({ token }: Props) {
         return
       }
       if (Math.abs(dy) < TAP_THRESHOLD && Math.abs(dx) < TAP_THRESHOLD) {
-        // Prevent the subsequent click event so xterm's internal handler
-        // doesn't steal focus from our managed input.
-        e.preventDefault()
         const xtermTa = termRef.current?.textarea
         // 工具栏展开时收起工具栏；若键盘也可见则一并收起
         if (toolbarCollapsedRef.current === false) {
@@ -1170,7 +1070,7 @@ export default function Terminal({ token }: Props) {
 
     container.addEventListener('touchstart', onTouchStart, { passive: true })
     container.addEventListener('touchmove', onTouchMove, { passive: false })
-    container.addEventListener('touchend', onTouchEnd, { passive: false })
+    container.addEventListener('touchend', onTouchEnd, { passive: true })
 
     // F-21: 拖拽上传文件
     function onDragOver(e: DragEvent) {
@@ -1468,8 +1368,6 @@ export default function Terminal({ token }: Props) {
     showScrollbackRef.current = false
     setShowScrollback(false)
     setScrollbackContent('')
-    scrollbackCacheRef.current = null
-    scrollbackPrefetchRef.current = null
   }
 
   function handleOverlayScroll(e: React.UIEvent<HTMLDivElement>) {
@@ -1485,24 +1383,14 @@ export default function Terminal({ token }: Props) {
     showScrollbackRef.current = true
     swipeUpAccumRef.current = 0
     setShowScrollback(true)
-
-    // Use pre-fetched cache if available (no loading flash)
-    if (scrollbackCacheRef.current !== null) {
-      setScrollbackContent(scrollbackCacheRef.current)
-      setScrollbackLoading(false)
-      return
-    }
-
     setScrollbackLoading(true)
+
     const wi = activeWindowIndexRef.current
     const s = activeTmuxSessionRef.current
-    const promise = scrollbackPrefetchRef.current ??
-      fetch(`/api/sessions/${wi}/scrollback?session=${encodeURIComponent(s)}&lines=3000`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then(r => r.ok ? r.json() : Promise.reject(r.status))
-
-    scrollbackPrefetchRef.current = null
-    promise
+    fetch(`/api/sessions/${wi}/scrollback?session=${encodeURIComponent(s)}&lines=3000`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then(({ content }: { content: string }) => {
         setScrollbackContent(content.trimEnd())
         setScrollbackLoading(false)
@@ -1536,7 +1424,6 @@ export default function Terminal({ token }: Props) {
     onOpenWorkspace: () => setShowWorkspace(true),
     onUpload: handleFileUpload,
     onUploadFile: uploadFile,
-    onShowCopySheet: (text: string) => setCopySheetText(text),
     collapsed: toolbarCollapsed,
     onCollapsedChange: setToolbarCollapsed,
   }
@@ -1730,7 +1617,7 @@ export default function Terminal({ token }: Props) {
               )}
             </div>
             <div className="flex-1 flex flex-col min-w-0 relative">
-              <div ref={containerRef} className="flex-1 overflow-hidden relative" />
+              <div ref={containerRef} className="flex-1 overflow-hidden relative" onClick={() => termRef.current?.textarea?.focus()} />
               {isConnecting && (
                 <div className="absolute inset-0 bg-nexus-bg flex flex-col items-center justify-center gap-3 z-10">
                   <div className="w-8 h-8 border-[3px] border-nexus-border border-t-nexus-accent rounded-full animate-spin" />
@@ -1884,38 +1771,6 @@ export default function Terminal({ token }: Props) {
           />
         </Suspense>
       )}
-      {copySheetText !== null && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-end justify-center bg-black/40"
-          onClick={() => setCopySheetText(null)}
-        >
-          <div
-            className="w-full max-w-lg bg-nexus-bg border-t border-nexus-border rounded-t-xl p-4 max-h-[60vh] flex flex-col gap-3"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between">
-              <span className="text-nexus-text font-medium text-sm">Terminal Content</span>
-              <button
-                className="text-xs px-3 py-1 rounded bg-nexus-accent text-white"
-                onClick={() => setCopySheetText(null)}
-              >
-                Close
-              </button>
-            </div>
-            <textarea
-              readOnly
-              value={copySheetText}
-              className="w-full flex-1 min-h-[200px] bg-nexus-surface text-nexus-text text-xs font-mono p-3 rounded border border-nexus-border resize-none"
-              style={{ userSelect: 'text', WebkitUserSelect: 'text' }}
-              onFocus={(e) => {
-                e.currentTarget.select()
-                e.currentTarget.setSelectionRange(0, e.currentTarget.value.length)
-              }}
-            />
-            <p className="text-nexus-text-2 text-xs text-center">Long press to select and copy</p>
-          </div>
-        </div>
-      )}
       {showSettings && (
         <Suspense fallback={null}>
           <SessionManager
@@ -2039,7 +1894,7 @@ export default function Terminal({ token }: Props) {
         const termFontFamily = termRef.current?.options.fontFamily ?? 'Menlo, Monaco, monospace'
         const termMuted = (termTheme as any).brightBlack ?? '#4a5568'
         return (
-          <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: termBg, bottom: isWidePC ? 0 : toolbarHeightRef.current }}>
+          <div className="fixed inset-0 z-[500] flex flex-col" style={{ background: termBg }}>
             <GhostShield />
             <div className="flex items-center justify-between px-3.5 py-2.5 border-b flex-shrink-0" style={{ borderColor: `${termMuted}44` }}>
               <span className="font-semibold text-sm" style={{ color: termFg }}>历史记录</span>
@@ -2059,11 +1914,9 @@ export default function Terminal({ token }: Props) {
               {scrollbackLoading ? (
                 <div className="text-center p-8" style={{ color: termMuted, fontFamily: termFontFamily, fontSize: termFontSize }}>加载中...</div>
               ) : (
-                <pre
-                  className="m-0 p-0 whitespace-pre-wrap break-all leading-tight"
-                  style={{ fontFamily: termFontFamily, fontSize: termFontSize, color: termFg }}
-                  dangerouslySetInnerHTML={{ __html: ansiToHtml(scrollbackContent) }}
-                />
+                <pre className="m-0 p-0 whitespace-pre-wrap break-all leading-tight" style={{ fontFamily: termFontFamily, fontSize: termFontSize, color: termFg }}>
+                  {scrollbackContent}
+                </pre>
               )}
             </div>
           </div>

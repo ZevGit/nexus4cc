@@ -35,3 +35,8 @@ data/*
 data/configs/*
 !data/configs/anthropic.json
 logs/
+
+# Local运维 scripts (not for production)
+auto-fix.sh
+nexus-run-crush.sh
+reset-env.sh
