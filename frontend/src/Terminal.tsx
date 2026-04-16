@@ -1757,6 +1757,7 @@ export default function Terminal({ token }: Props) {
         <Suspense fallback={null}>
           <FilePanel
             token={token}
+            session={activeTmuxSession}
             onClose={() => setShowFiles(false)}
           />
         </Suspense>

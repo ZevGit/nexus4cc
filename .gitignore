@@ -29,7 +29,11 @@ screenshots/
 ecosystem.config.cjs
 
 # Runtime data (tasks, session configs)
-data/
+# Ignore everything under data/, except the default anthropic profile (no secrets)
+data/*
+!data/configs/
+data/configs/*
+!data/configs/anthropic.json
 logs/
 
 # Local运维 scripts (not for production)
